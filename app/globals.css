@@ -4,16 +4,19 @@
   color-scheme: dark;
 }
 
-html,
-body {
+html, body {
   height: 100%;
-  background: #050812;
-  overflow: hidden;
+  background: #050816;
 }
 
 .noise {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E");
-  background-size: 160px 160px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
 }
 
 .noor-beams::before,
@@ -35,11 +38,11 @@ body {
 }
 
 .glass {
-  background: rgba(10, 14, 28, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   box-shadow:
-    0 18px 60px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 20px 60px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.05);
   backdrop-filter: blur(10px);
 }
 
@@ -55,4 +58,29 @@ body {
   0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
   70% { box-shadow: 0 0 0 14px rgba(34, 197, 94, 0); }
   100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.noor-bg {
+  background:
+    radial-gradient(1200px 700px at 75% 25%, rgba(59,130,246,0.18), transparent 60%),
+    radial-gradient(900px 600px at 20% 80%, rgba(16,185,129,0.16), transparent 60%),
+    radial-gradient(900px 600px at 50% 50%, rgba(99,102,241,0.10), transparent 60%),
+    linear-gradient(180deg, #020617 0%, #050816 60%, #020617 100%);
+}
+.tick {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.marquee {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.marquee > div {
+  display: inline-block;
+  padding-left: 100%;
+  animation: marquee 20s linear infinite;
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
 }

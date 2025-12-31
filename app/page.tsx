@@ -1,242 +1,288 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+// Optional QR
+// import QRCode from "qrcode.react";
 
 type Masjid = {
   id: string;
-  slug: string | null;
   official_name: string;
   city: string | null;
+  timezone: string | null;
 };
 
 type PrayerKey = "fajr" | "dhuhr" | "asr" | "maghrib" | "isha";
+
 type PrayerRow = {
   prayer: PrayerKey;
-  start_time: string; // "HH:MM:SS"
+  start_time: string;  // "HH:MM:SS"
   jamaat_time: string; // "HH:MM:SS"
+  date: string;        // "YYYY-MM-DD"
 };
 
-type Announcement = {
+type AnnouncementRow = {
   id: number;
   title: string;
   body: string;
   category: string;
   is_pinned: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  created_at: string;
 };
 
+type SlideKey = "board" | "announcements";
+
 const PRAYER_ORDER: PrayerKey[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+const PRAYER_LABEL: Record<PrayerKey, string> = {
+  fajr: "Fajr",
+  dhuhr: "Dhuhr",
+  asr: "Asr",
+  maghrib: "Maghrib",
+  isha: "Isha",
+};
 
-function hhmm(t?: string | null) {
-  if (!t) return "—";
-  return t.slice(0, 5);
+function two(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-function todayISO() {
-  const d = new Date();
-  // local date (good for “today” display)
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function formatTimeHHMM(time: string) {
+  // "HH:MM:SS" -> "HH:MM"
+  return time?.slice(0, 5) ?? "—";
 }
 
-function getParam(name: string) {
-  if (typeof window === "undefined") return null;
-  const v = new URLSearchParams(window.location.search).get(name);
-  return v && v.trim().length ? v.trim() : null;
+function nowInTimeZone(tz: string | null) {
+  // Uses Intl to “simulate” local time in a tz
+  const timeZone = tz || "Europe/Rome";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(new Date());
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const year = Number(get("year"));
+  const month = Number(get("month"));
+  const day = Number(get("day"));
+  const hour = Number(get("hour"));
+  const minute = Number(get("minute"));
+  const second = Number(get("second"));
+  const weekday = get("weekday");
+
+  return { year, month, day, hour, minute, second, weekday, timeZone };
 }
 
-function useClock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const time = useMemo(() => {
-    const h = String(now.getHours()).padStart(2, "0");
-    const m = String(now.getMinutes()).padStart(2, "0");
-    return `${h}:${m}`;
-  }, [now]);
-  const date = useMemo(() => {
-    return now.toLocaleDateString("it-IT", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
-  }, [now]);
-  return { now, time, date };
+function ymdFromTZ(tz: string | null) {
+  const n = nowInTimeZone(tz);
+  return `${n.year}-${two(n.month)}-${two(n.day)}`;
 }
 
-export default function TvHome() {
-  const { time, date } = useClock();
+function computeNextPrayer(prayers: PrayerRow[], tz: string | null) {
+  const n = nowInTimeZone(tz);
+  const today = `${n.year}-${two(n.month)}-${two(n.day)}`;
+  const minutesNow = n.hour * 60 + n.minute;
 
-  const [bootError, setBootError] = useState<string | null>(null);
+  const todayRows = prayers.filter((p) => p.date === today);
+
+  // next based on jamaat time (better for TV)
+  for (const key of PRAYER_ORDER) {
+    const row = todayRows.find((r) => r.prayer === key);
+    if (!row) continue;
+    const [hh, mm] = row.jamaat_time.slice(0, 5).split(":").map(Number);
+    const mins = hh * 60 + mm;
+    if (mins >= minutesNow) return { prayer: key, mins };
+  }
+  // fallback: first prayer
+  const first = todayRows.find((r) => r.prayer === "fajr") ?? null;
+  if (first) {
+    const [hh, mm] = first.jamaat_time.slice(0, 5).split(":").map(Number);
+    return { prayer: "fajr" as PrayerKey, mins: hh * 60 + mm };
+  }
+  return null;
+}
+
+function msUntilNextSecond() {
+  const now = new Date();
+  return 1000 - now.getMilliseconds();
+}
+
+/** Fullscreen helpers */
+function canFullscreen() {
+  return typeof document !== "undefined" && !!document.documentElement.requestFullscreen;
+}
+async function enterFullscreen() {
+  try {
+    if (!canFullscreen()) return;
+    if (document.fullscreenElement) return;
+    await document.documentElement.requestFullscreen();
+  } catch {
+    // ignore
+  }
+}
+async function exitFullscreen() {
+  try {
+    if (!document.fullscreenElement) return;
+    await document.exitFullscreen();
+  } catch {
+    // ignore
+  }
+}
+
+export default function TVPage() {
+  const sp = useSearchParams();
+
+  const masjidId = sp.get("masjid"); // UUID is the truth ✅
+  const cycleSec = Math.max(8, Number(sp.get("cycle") ?? 14)); // per-slide seconds
+  const tzOverride = sp.get("tz"); // optional override
+
+  const alive = useRef(true);
+
   const [masjid, setMasjid] = useState<Masjid | null>(null);
+  const [prayers, setPrayers] = useState<PrayerRow[]>([]);
+  const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
+  const [bootError, setBootError] = useState<string | null>(null);
 
-  const [prayers, setPrayers] = useState<Record<PrayerKey, PrayerRow | null>>({
-    fajr: null,
-    dhuhr: null,
-    asr: null,
-    maghrib: null,
-    isha: null,
-  });
+  const [clock, setClock] = useState(() => nowInTimeZone("Europe/Rome"));
+  const tz = tzOverride || masjid?.timezone || "Europe/Rome";
 
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [slide, setSlide] = useState<SlideKey>("board");
+  const [slideProgress, setSlideProgress] = useState(0);
 
-  // slideshow config (can later come from masjid_tv_settings)
-  const [slideSeconds, setSlideSeconds] = useState<number>(10);
+  const [fullscreenPrompt, setFullscreenPrompt] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const [slideIndex, setSlideIndex] = useState<number>(0);
-  const slides = useMemo(() => ["prayers", "announcements", "clock"] as const, []);
-
-  const aliveRef = useRef(true);
-
-  // 1) Resolve masjid (uuid or slug)
+  // Track fullscreen state
   useEffect(() => {
-    aliveRef.current = true;
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    onFs();
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
-    const run = async () => {
-      setBootError(null);
-
-      const masjidId = getParam("masjid");
-      const slug = getParam("slug");
-
-      if (!masjidId && !slug) {
-        setBootError(
-          "Missing masjid. Use: ?masjid=<uuid> OR ?slug=<slug> (example: tv.ummahway.com?slug=bolzano)"
-        );
-        return;
+  // Global key handlers (TV remote often maps OK/Enter)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key.toLowerCase() === "f") {
+        enterFullscreen().then(() => setFullscreenPrompt(false));
       }
-
-      try {
-        const q = supabase
-          .from("public_masjids")
-          .select("id, slug, official_name, city")
-          .limit(1);
-
-        const { data, error } = masjidId
-          ? await q.eq("id", masjidId).maybeSingle()
-          : await q.eq("slug", slug!).maybeSingle();
-
-        if (error || !data) {
-          setBootError("Masjid not found or not public.");
-          return;
-        }
-
-        if (!aliveRef.current) return;
-        setMasjid(data as Masjid);
-      } catch {
-        setBootError("Could not connect to backend.");
+      if (e.key === "Escape") {
+        exitFullscreen();
       }
     };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-    void run();
+  // Smooth clock in masjid timezone
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+
+    const tick = () => {
+      setClock(nowInTimeZone(tz));
+      timer = setTimeout(tick, msUntilNextSecond());
+    };
+
+    timer = setTimeout(tick, msUntilNextSecond());
+    return () => clearTimeout(timer);
+  }, [tz]);
+
+  // Load masjid + data
+  async function loadAll(mId: string) {
+    // Masjid
+    const { data: m, error: mErr } = await supabase
+      .from("public_masjids")
+      .select("id, official_name, city, timezone")
+      .eq("id", mId)
+      .maybeSingle();
+
+    if (mErr || !m) throw new Error("Masjid not found or not public.");
+    if (!alive.current) return;
+
+    setMasjid(m as Masjid);
+
+    const today = ymdFromTZ(m.timezone);
+
+    // Prayer times (today)
+    const { data: p, error: pErr } = await supabase
+      .from("masjid_prayer_times")
+      .select("prayer, start_time, jamaat_time, date")
+      .eq("masjid_id", mId)
+      .eq("date", today)
+      .order("prayer", { ascending: true });
+
+    if (!alive.current) return;
+    if (pErr) setPrayers([]);
+    else setPrayers((p ?? []) as PrayerRow[]);
+
+    // Announcements (active)
+    const { data: a, error: aErr } = await supabase
+      .from("masjid_announcements")
+      .select("id, title, body, category, is_pinned, starts_at, ends_at, created_at")
+      .eq("masjid_id", mId)
+      .or("starts_at.is.null,starts_at.lte.now()")
+      .or("ends_at.is.null,ends_at.gte.now()")
+      .order("is_pinned", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (!alive.current) return;
+    if (aErr) setAnnouncements([]);
+    else setAnnouncements((a ?? []) as AnnouncementRow[]);
+  }
+
+  // Boot
+  useEffect(() => {
+    alive.current = true;
+    setBootError(null);
+
+    if (!masjidId) {
+      setBootError("Missing masjid id. Use: ?masjid=<UUID>");
+      return () => {
+        alive.current = false;
+      };
+    }
+
+    (async () => {
+      try {
+        await loadAll(masjidId);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Could not load TV data.";
+        setBootError(message);
+      }
+    })();
 
     return () => {
-      aliveRef.current = false;
+      alive.current = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masjidId]);
 
-  // 2) Load prayers + announcements for today
+  // Realtime refresh (prayers + announcements)
   useEffect(() => {
-    if (!masjid?.id) return;
-
-    const loadAll = async () => {
-      const iso = todayISO();
-
-      // prayers
-      const { data: pData } = await supabase
-        .from("masjid_prayer_times")
-        .select("prayer, start_time, jamaat_time")
-        .eq("masjid_id", masjid.id)
-        .eq("date", iso);
-
-      const map: Record<PrayerKey, PrayerRow | null> = {
-        fajr: null,
-        dhuhr: null,
-        asr: null,
-        maghrib: null,
-        isha: null,
-      };
-
-      (pData as PrayerRow[] | null)?.forEach((r) => {
-        map[r.prayer as PrayerKey] = r;
-      });
-      setPrayers(map);
-
-      // announcements (active view)
-      const { data: aData } = await supabase
-        .from("masjid_announcements_active")
-        .select("id, title, body, category, is_pinned")
-        .eq("masjid_id", masjid.id)
-        .limit(25);
-
-      setAnnouncements(((aData ?? []) as Announcement[]).sort((a, b) => {
-        if (a.is_pinned === b.is_pinned) return b.id - a.id;
-        return a.is_pinned ? -1 : 1;
-      }));
-    };
-
-    void loadAll();
-  }, [masjid?.id]);
-
-  // 3) Realtime subscriptions
-  useEffect(() => {
-    if (!masjid?.id) return;
+    if (!masjidId) return;
 
     const channel = supabase
-      .channel(`tv-${masjid.id}`)
+      .channel(`tv:${masjidId}`)
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "masjid_prayer_times",
-          filter: `masjid_id=eq.${masjid.id}`,
-        },
+        { event: "*", schema: "public", table: "masjid_prayer_times", filter: `masjid_id=eq.${masjidId}` },
         async () => {
-          // refresh only prayers today
-          const iso = todayISO();
-          const { data } = await supabase
-            .from("masjid_prayer_times")
-            .select("prayer, start_time, jamaat_time")
-            .eq("masjid_id", masjid.id)
-            .eq("date", iso);
-
-          const map: Record<PrayerKey, PrayerRow | null> = {
-            fajr: null,
-            dhuhr: null,
-            asr: null,
-            maghrib: null,
-            isha: null,
-          };
-          (data as PrayerRow[] | null)?.forEach((r) => {
-            map[r.prayer as PrayerKey] = r;
-          });
-          setPrayers(map);
+          try { await loadAll(masjidId); } catch {}
         }
       )
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "masjid_announcements",
-          filter: `masjid_id=eq.${masjid.id}`,
-        },
+        { event: "*", schema: "public", table: "masjid_announcements", filter: `masjid_id=eq.${masjidId}` },
         async () => {
-          const { data } = await supabase
-            .from("masjid_announcements_active")
-            .select("id, title, body, category, is_pinned")
-            .eq("masjid_id", masjid.id)
-            .limit(25);
-
-          setAnnouncements(((data ?? []) as Announcement[]).sort((a, b) => {
-            if (a.is_pinned === b.is_pinned) return b.id - a.id;
-            return a.is_pinned ? -1 : 1;
-          }));
+          try { await loadAll(masjidId); } catch {}
         }
       )
       .subscribe();
@@ -244,38 +290,65 @@ export default function TvHome() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [masjid?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masjidId]);
 
-  // 4) Slideshow loop
+  // Slideshow
   useEffect(() => {
-    const id = setInterval(() => {
-      setSlideIndex((i) => (i + 1) % slides.length);
-    }, Math.max(4, slideSeconds) * 1000);
+    const slides: SlideKey[] = announcements.length > 0 ? ["board", "announcements"] : ["board"];
+    let i = 0;
+    setSlide(slides[0]);
+    setSlideProgress(0);
 
-    return () => clearInterval(id);
-  }, [slideSeconds, slides.length]);
+    const start = Date.now();
+    const tick = () => {
+      const elapsed = (Date.now() - start) / 1000;
+      const prog = (elapsed % cycleSec) / cycleSec;
+      setSlideProgress(prog);
+    };
 
-  const currentSlide = slides[slideIndex];
+    const progressTimer = setInterval(tick, 100);
 
+    const timer = setInterval(() => {
+      i = (i + 1) % slides.length;
+      setSlide(slides[i]);
+    }, cycleSec * 1000);
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(progressTimer);
+    };
+  }, [cycleSec, announcements.length]);
+
+  const next = useMemo(() => computeNextPrayer(prayers, tz), [prayers, tz]);
+  const nextLabel = next ? PRAYER_LABEL[next.prayer] : "—";
+
+  // Countdown
+  const countdown = useMemo(() => {
+    if (!next) return "—";
+    const n = nowInTimeZone(tz);
+    const nowM = n.hour * 60 + n.minute;
+    let diff = next.mins - nowM;
+    if (diff < 0) diff += 24 * 60;
+    const h = Math.floor(diff / 60);
+    const m = diff % 60;
+    if (h <= 0) return `${m} min`;
+    return `${h}h ${m}m`;
+  }, [next, clock, tz]);
+
+  // UI states
   if (bootError) {
     return (
-      <div className="relative h-screen w-screen overflow-hidden text-white">
-        <div className="absolute inset-0 noor-beams noise" />
-        <div className="relative z-10 flex h-full w-full items-center justify-center p-10">
-          <div className="glass panel w-full max-w-4xl p-10">
-            <div className="flex items-center gap-3">
-              <div className="h-3 w-3 rounded-full bg-red-400" />
-              <div className="text-sm uppercase tracking-[0.35em] text-white/70">
-                UmmahWay TV
-              </div>
+      <div className="relative min-h-screen noor-bg text-white">
+        <div className="noise" />
+        <div className="mx-auto flex min-h-screen max-w-5xl items-center justify-center p-10">
+          <div className="glass w-full rounded-3xl p-10">
+            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
+            <div className="mt-4 text-3xl font-black">Could not load display</div>
+            <div className="mt-4 text-white/70">{bootError}</div>
+            <div className="mt-6 text-sm text-white/40">
+              Example URL: <span className="font-mono">/ ?masjid=&lt;UUID&gt;</span>
             </div>
-            <h1 className="mt-5 text-4xl font-black leading-tight">
-              TV display not configured
-            </h1>
-            <p className="mt-4 text-lg text-white/70">{bootError}</p>
-            <p className="mt-6 text-white/50">
-              Example: <span className="text-white/80">tv.ummahway.com?slug=bolzano</span>
-            </p>
           </div>
         </div>
       </div>
@@ -284,253 +357,282 @@ export default function TvHome() {
 
   if (!masjid) {
     return (
-      <div className="relative h-screen w-screen overflow-hidden text-white">
-        <div className="absolute inset-0 noor-beams noise" />
-        <div className="relative z-10 flex h-full w-full items-center justify-center">
-          <div className="glass panel px-10 py-8">
-            <div className="flex items-center gap-3">
-              <div className="h-3 w-3 rounded-full bg-emerald-400 pulseDot" />
-              <div className="text-sm uppercase tracking-[0.35em] text-white/70">
-                Loading masjid…
-              </div>
-            </div>
+      <div className="relative min-h-screen noor-bg text-white">
+        <div className="noise" />
+        <div className="mx-auto flex min-h-screen max-w-5xl items-center justify-center p-10">
+          <div className="glass w-full rounded-3xl p-10">
+            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
+            <div className="mt-4 text-3xl font-black">Loading…</div>
+            <div className="mt-2 text-white/60">Connecting to masjid feed</div>
           </div>
         </div>
       </div>
     );
   }
 
+  const title = masjid.official_name;
+  const place = masjid.city ? `${masjid.city}` : "";
+
   return (
-    <div className="relative h-screen w-screen overflow-hidden text-white">
-      {/* Background */}
-      <div className="absolute inset-0 noor-beams noise" />
+    <div
+      className="relative h-screen w-screen overflow-hidden text-white"
+      onClick={() => {
+        // click/OK once -> fullscreen
+        if (!isFullscreen) {
+          enterFullscreen().then(() => setFullscreenPrompt(false));
+        } else {
+          setFullscreenPrompt(false);
+        }
+      }}
+    >
+      <div className="absolute inset-0 noor-bg" />
+      <div className="noise" />
 
-      {/* Top chrome */}
-      <div className="relative z-10 flex h-full w-full flex-col p-10">
-        <div className="flex items-start justify-between gap-8">
-          <div className="glass panel px-8 py-6">
-            <div className="text-xs uppercase tracking-[0.38em] text-white/60">
-              UmmahWay • Masjid Display
-            </div>
-            <div className="mt-3 text-4xl font-black leading-tight">
-              {masjid.official_name}
-            </div>
-            <div className="mt-2 text-lg text-white/70">
-              {masjid.city ?? "—"} • {date}
-            </div>
-          </div>
-
-          <div className="glass panel px-8 py-6 text-right">
-            <div className="text-xs uppercase tracking-[0.38em] text-white/60">
-              Live Time
-            </div>
-            <div className="mt-2 text-6xl font-black tabular-nums">
-              {time}
-            </div>
-            <div className="mt-3 flex items-center justify-end gap-3 text-white/70">
-              <span className="h-3 w-3 rounded-full bg-emerald-400 pulseDot" />
-              <span className="text-sm uppercase tracking-[0.28em]">
-                auto-updating
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Main stage */}
-        <div className="mt-8 grid flex-1 grid-cols-12 gap-8">
-          <div className="col-span-8 glass panel p-10">
-            {currentSlide === "prayers" && (
-              <PrayersSlide prayers={prayers} />
-            )}
-            {currentSlide === "announcements" && (
-              <AnnouncementsSlide announcements={announcements} />
-            )}
-            {currentSlide === "clock" && (
-              <ClockSlide time={time} date={date} />
-            )}
-          </div>
-
-          {/* Right rail: fixed “now / next” feel */}
-          <div className="col-span-4 flex flex-col gap-8">
-            <div className="glass panel p-8">
-              <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-                Slide
-              </div>
-              <div className="mt-3 text-2xl font-extrabold">
-                {currentSlide === "prayers"
-                  ? "Prayer Times"
-                  : currentSlide === "announcements"
-                  ? "Announcements"
-                  : "Clock & Date"}
-              </div>
-
-              <div className="mt-6 grid grid-cols-3 gap-3">
-                {["prayers", "announcements", "clock"].map((k, idx) => {
-                  const active = idx === slideIndex;
-                  return (
-                    <button
-                      key={k}
-                      className={`rounded-2xl border px-3 py-3 text-center text-xs font-bold uppercase tracking-[0.25em] ${
-                        active
-                          ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-100"
-                          : "border-white/10 bg-white/5 text-white/60"
-                      }`}
-                      onClick={() => setSlideIndex(idx)}
-                    >
-                      {k}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-6 text-sm text-white/60">
-                Rotation:{" "}
-                <span className="text-white/80 font-semibold">
-                  {slideSeconds}s
-                </span>
-              </div>
-
-              <div className="mt-3 flex gap-3">
-                <button
-                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 hover:bg-white/10"
-                  onClick={() => setSlideSeconds((s) => Math.max(4, s - 2))}
-                >
-                  −
-                </button>
-                <button
-                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 hover:bg-white/10"
-                  onClick={() => setSlideSeconds((s) => Math.min(30, s + 2))}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="glass panel p-8">
-              <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-                Quick Tip
-              </div>
-              <div className="mt-3 text-white/75 leading-relaxed">
-                Use a kiosk browser on the TV device and open:
-                <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-mono text-sm text-white/80">
-                  tv.ummahway.com?slug={masjid.slug ?? "your-slug"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom footer */}
-        <div className="mt-8 flex items-center justify-between text-white/40">
-          <div className="text-xs uppercase tracking-[0.30em]">
-            Powered by UmmahWay • Supabase Realtime
-          </div>
-          <div className="text-xs uppercase tracking-[0.30em]">
-            Masjid: {masjid.id}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PrayersSlide({
-  prayers,
-}: {
-  prayers: Record<PrayerKey, PrayerRow | null>;
-}) {
-  return (
-    <div className="h-full">
-      <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-        Today’s Prayer Times
-      </div>
-      <div className="mt-6 grid grid-cols-1 gap-4">
-        {PRAYER_ORDER.map((k) => {
-          const row = prayers[k];
-          const label = k.toUpperCase();
-          return (
-            <div
-              key={k}
-              className="flex items-center justify-between rounded-3xl border border-white/10 bg-white/5 px-8 py-6"
-            >
-              <div>
-                <div className="text-2xl font-black tracking-wide">{label}</div>
-                <div className="mt-2 text-sm uppercase tracking-[0.30em] text-white/50">
-                  start • jamaat
-                </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-4xl font-black tabular-nums text-emerald-100">
-                  {hhmm(row?.jamaat_time)}
-                </div>
-                <div className="mt-2 text-lg tabular-nums text-white/65">
-                  {hhmm(row?.start_time)}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function AnnouncementsSlide({ announcements }: { announcements: Announcement[] }) {
-  return (
-    <div className="h-full">
-      <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-        Announcements
+      {/* Top-right fullscreen button */}
+      <div className="absolute right-6 top-6 z-20">
+        <button
+          className="glass rounded-2xl px-5 py-3 text-lg font-extrabold text-white/90 hover:text-white"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isFullscreen) exitFullscreen();
+            else enterFullscreen().then(() => setFullscreenPrompt(false));
+          }}
+        >
+          {isFullscreen ? "⤢ Exit" : "⛶ Fullscreen"}
+        </button>
       </div>
 
-      {announcements.length === 0 ? (
-        <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-10 text-white/70">
-          <div className="text-2xl font-extrabold">No announcements right now</div>
-          <div className="mt-3 text-white/60">
-            Admin updates will appear here automatically.
-          </div>
-        </div>
-      ) : (
-        <div className="mt-6 grid gap-4">
-          {announcements.slice(0, 6).map((a) => (
-            <div
-              key={a.id}
-              className={`rounded-3xl border p-8 ${
-                a.is_pinned
-                  ? "border-emerald-400/30 bg-emerald-400/10"
-                  : "border-white/10 bg-white/5"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-6">
-                <div className="text-2xl font-black">{a.title}</div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.30em] text-white/70">
-                  {a.category}
-                </div>
-              </div>
-              <div className="mt-4 text-lg leading-relaxed text-white/75">
-                {a.body}
-              </div>
+      {/* Fullscreen prompt overlay (TV-friendly) */}
+      {fullscreenPrompt && !isFullscreen && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-10">
+          <div className="glass w-full max-w-4xl rounded-3xl p-12 text-center">
+            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
+            <div className="mt-5 text-5xl font-black">Press OK to go Fullscreen</div>
+            <div className="mt-4 text-xl text-white/70">
+              Click / press Enter once. After that, the display runs hands-free.
             </div>
-          ))}
+            <div className="mt-8 text-sm text-white/40">
+              Tip: On most remotes, OK = click.
+            </div>
+            <div className="mt-10">
+              <button
+                className="rounded-2xl bg-emerald-400 px-8 py-4 text-xl font-black text-emerald-950"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  enterFullscreen().then(() => setFullscreenPrompt(false));
+                }}
+              >
+                Enter Fullscreen
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function ClockSlide({ time, date }: { time: string; date: string }) {
-  return (
-    <div className="h-full flex flex-col items-center justify-center text-center">
-      <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-        Live
+      {/* Slide progress bar */}
+      <div className="absolute left-0 top-0 z-10 h-1 w-full bg-white/10">
+        <div
+          className="h-full bg-emerald-400 transition-[width]"
+          style={{ width: `${Math.round(slideProgress * 100)}%` }}
+        />
       </div>
-      <div className="mt-6 text-[120px] leading-none font-black tabular-nums">
-        {time}
-      </div>
-      <div className="mt-6 text-2xl text-white/70">{date}</div>
 
-      <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 px-10 py-6 text-white/70">
-        Tip: set your TV to auto-open this page in kiosk mode.
+      {/* Content */}
+      <div className="relative z-10 flex h-full w-full flex-col p-8">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-8">
+          <div className="glass rounded-3xl px-8 py-6">
+            <div className="text-xs uppercase tracking-[0.35em] text-white/60">
+              Prayer Times • Jamaat • Announcements
+            </div>
+            <div className="mt-3 text-5xl font-black leading-tight">{title}</div>
+            {place && <div className="mt-2 text-2xl text-white/70">{place}</div>}
+          </div>
+
+          <div className="glass rounded-3xl px-8 py-6 text-right">
+            <div className="text-sm uppercase tracking-[0.32em] text-white/60">
+              {clock.weekday} • {two(clock.day)}/{two(clock.month)}/{clock.year}
+            </div>
+            <div className="tick mt-3 text-6xl font-black">
+              {two(clock.hour)}:{two(clock.minute)}
+              <span className="text-white/40">:{two(clock.second)}</span>
+            </div>
+            <div className="mt-3 text-xl text-white/70">
+              Next: <span className="font-black text-white">{nextLabel}</span>{" "}
+              <span className="text-white/50">in</span>{" "}
+              <span className="font-black text-emerald-300">{countdown}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Slides */}
+        <div className="mt-8 flex flex-1 gap-8">
+          {slide === "board" ? (
+            <>
+              {/* Prayer panel */}
+              <div className="glass w-[58%] rounded-3xl p-8">
+                <div className="flex items-end justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.35em] text-white/60">Today</div>
+                    <div className="mt-2 text-3xl font-black">Prayer Schedule</div>
+                  </div>
+                  <div className="text-lg text-white/60">
+                    Times are local <span className="font-black text-white/80">{tz}</span>
+                  </div>
+                </div>
+
+                <div className="mt-8 grid grid-cols-3 gap-4 text-white/85">
+                  <div className="text-lg font-extrabold text-white/55 uppercase tracking-widest">Prayer</div>
+                  <div className="text-lg font-extrabold text-white/55 uppercase tracking-widest text-center">Start</div>
+                  <div className="text-lg font-extrabold text-white/55 uppercase tracking-widest text-right">Jamaat</div>
+
+                  {PRAYER_ORDER.map((k) => {
+                    const row = prayers.find((p) => p.prayer === k);
+                    const isNext = next?.prayer === k;
+
+                    return (
+                      <React.Fragment key={k}>
+                        <div
+                          className={[
+                            "rounded-2xl px-4 py-5 text-3xl font-black",
+                            isNext ? "bg-emerald-400 text-emerald-950" : "bg-white/5",
+                          ].join(" ")}
+                        >
+                          {PRAYER_LABEL[k]}
+                        </div>
+                        <div
+                          className={[
+                            "rounded-2xl px-4 py-5 text-center text-3xl font-black tick",
+                            isNext ? "bg-emerald-400 text-emerald-950" : "bg-white/5",
+                          ].join(" ")}
+                        >
+                          {row ? formatTimeHHMM(row.start_time) : "—"}
+                        </div>
+                        <div
+                          className={[
+                            "rounded-2xl px-4 py-5 text-right text-3xl font-black tick",
+                            isNext ? "bg-emerald-400 text-emerald-950" : "bg-white/5",
+                          ].join(" ")}
+                        >
+                          {row ? formatTimeHHMM(row.jamaat_time) : "—"}
+                        </div>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {/* Footer hint (optional) */}
+                <div className="mt-8 text-sm text-white/45">
+                  Update instantly from admin — TVs refresh automatically.
+                </div>
+              </div>
+
+              {/* Announcements preview */}
+              <div className="glass w-[42%] rounded-3xl p-8">
+                <div className="flex items-end justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.35em] text-white/60">Now</div>
+                    <div className="mt-2 text-3xl font-black">Announcements</div>
+                  </div>
+                  <div className="text-lg text-white/60">
+                    {announcements.length} items
+                  </div>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  {announcements.slice(0, 5).map((a) => (
+                    <div key={a.id} className="rounded-3xl border border-white/10 bg-white/5 p-5">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="text-2xl font-black leading-tight">{a.title}</div>
+                        {a.is_pinned && (
+                          <div className="rounded-full bg-amber-300/20 px-4 py-2 text-sm font-black text-amber-200">
+                            PINNED
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-2 text-lg leading-7 text-white/70 line-clamp-3">
+                        {a.body}
+                      </div>
+                    </div>
+                  ))}
+
+                  {announcements.length === 0 && (
+                    <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-xl text-white/60">
+                      No announcements right now.
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 text-sm text-white/45">
+                  Full list rotates on the next slide.
+                </div>
+              </div>
+            </>
+          ) : (
+            // Full announcements slide (big text)
+            <div className="glass w-full rounded-3xl p-10">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.35em] text-white/60">Important</div>
+                  <div className="mt-2 text-4xl font-black">Announcements</div>
+                </div>
+
+                {/* Optional QR for admin / info page */}
+                {/* <div className="rounded-3xl bg-white p-4">
+                  <QRCode value={`https://ummahway.com/admin`} size={110} />
+                </div> */}
+              </div>
+
+              <div className="mt-8 grid grid-cols-2 gap-6">
+                {announcements.slice(0, 8).map((a) => (
+                  <div
+                    key={a.id}
+                    className={[
+                      "rounded-3xl border p-7",
+                      a.is_pinned
+                        ? "border-amber-300/30 bg-amber-200/10"
+                        : "border-white/10 bg-white/5",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="text-3xl font-black leading-tight">{a.title}</div>
+                      {a.is_pinned && (
+                        <div className="rounded-full bg-amber-300/20 px-4 py-2 text-sm font-black text-amber-200">
+                          PINNED
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 text-xl leading-8 text-white/75">
+                      {a.body}
+                    </div>
+                  </div>
+                ))}
+
+                {announcements.length === 0 && (
+                  <div className="col-span-2 rounded-3xl border border-white/10 bg-white/5 p-10 text-2xl text-white/60">
+                    No announcements right now.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom ticker (optional) */}
+        <div className="mt-6 glass rounded-3xl px-8 py-5">
+          <div className="flex items-center gap-6">
+            <div className="rounded-full bg-emerald-400 px-4 py-2 text-sm font-black text-emerald-950">
+              LIVE
+            </div>
+            <div className="marquee flex-1 text-xl text-white/80">
+              <div>
+                {announcements.length
+                  ? announcements.map((a) => `• ${a.title}`).join("   ")
+                  : "• Welcome • Prayer times update automatically •"}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
