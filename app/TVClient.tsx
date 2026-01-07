@@ -859,7 +859,7 @@ export default function TVClient() {
                 <div className="min-w-0">
                   <div className="text-xs uppercase tracking-[0.35em] text-white/60">Friday Special</div>
                   <div className="mt-2 text-[clamp(2rem,3.6vw,3.6rem)] font-black truncate">
-                    Jumu’ah Mubarak ✨
+                    Jumu’ah✨
                   </div>
                   <div className="mt-2 text-lg text-white/70 line-clamp-2">
                     {nextJ?.row
