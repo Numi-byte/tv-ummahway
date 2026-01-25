@@ -1,13 +1,20 @@
 "use client";
 
+// AURORA - Minimal Cinematic TV Display
+// Each slide is a full-screen experience with clean, focused content
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import QRCode from "react-qr-code";
 
+/* =========================================================
+   Types
+   ========================================================= */
 type Masjid = {
   id: string;
   official_name: string;
+  short_name?: string | null;
   city: string | null;
   timezone: string | null;
   latitude?: number | null;
@@ -15,163 +22,58 @@ type Masjid = {
 };
 
 type PrayerKey = "fajr" | "dhuhr" | "asr" | "maghrib" | "isha";
+type PrayerRow = { prayer: PrayerKey; start_time: string; jamaat_time: string; date: string };
+type AnnouncementRow = { id: number; title: string; body: string; category: string; is_pinned: boolean };
+type JumuahRow = { id: number; slot: number; khutbah_time: string; jamaat_time: string; language: string | null; notes: string | null; valid_from: string | null; valid_to: string | null };
+type WeatherOut = { location: { name: string }; current?: { temperature: number | null; weathercode: number | null }; daily: Array<{ date: string; tmax: number | null; tmin: number | null; weathercode: number | null }> };
+type HadithOut = { collection: string; hadithnumber: number; text: string; grade?: string | null };
 
-type PrayerRow = {
-  prayer: PrayerKey;
-  start_time: string;
-  jamaat_time: string;
-  date: string;
-};
+type SlideType = "welcome" | "clock" | "prayers" | "next-prayer" | "jumuah" | "announcement" | "weather" | "hadith" | "qr";
 
-type AnnouncementRow = {
-  id: number;
-  title: string;
-  body: string;
-  category: string;
-  is_pinned: boolean;
-  starts_at: string | null;
-  ends_at: string | null;
-  created_at: string;
-};
-
-type JumuahRow = {
-  id: number;
-  slot: number;
-  khutbah_time: string;
-  jamaat_time: string;
-  language: string | null;
-  notes: string | null;
-  valid_from: string | null;
-  valid_to: string | null;
-};
-
-type WeatherOut = {
-  location: { name: string; latitude: number; longitude: number };
-  current?: { temperature: number | null; weathercode: number | null };
-  daily: Array<{
-    date: string;
-    tmax: number | null;
-    tmin: number | null;
-    precipProbMax: number | null;
-    weathercode: number | null;
-  }>;
-};
-
-type HadithOut = {
-  collection: string;
-  edition: string;
-  hadithnumber: number;
-  text: string;
-  grade?: string | null;
-  reference?: { book?: number; hadith?: number };
-};
-
-type SlideKey = "board" | "jumuah" | "announcements";
-
-const PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=com.ummahway.app";
-
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.ummahway.app";
 const PRAYER_ORDER: PrayerKey[] = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
-const PRAYER_LABEL: Record<PrayerKey, string> = {
-  fajr: "Fajr",
-  dhuhr: "Dhuhr",
-  asr: "Asr",
-  maghrib: "Maghrib",
-  isha: "Isha",
+const PRAYER_LABELS: Record<PrayerKey, string> = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha" };
+const PRAYER_ICONS: Record<PrayerKey, string> = { fajr: "🌅", dhuhr: "☀️", asr: "🌤️", maghrib: "🌅", isha: "🌙" };
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+const two = (n: number) => String(n).padStart(2, "0");
+const formatTime = (t?: string | null) => (t ? t.slice(0, 5) : "—");
+const timeToMins = (t?: string | null) => {
+  if (!t) return null;
+  const [h, m] = t.slice(0, 5).split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
 };
 
-function two(n: number) {
-  return String(n).padStart(2, "0");
-}
-function formatTimeHHMM(time?: string | null) {
-  return time ? time.slice(0, 5) : "—";
-}
-function timeToMinutes(t?: string | null) {
-  if (!t) return null;
-  const [hh, mm] = t.slice(0, 5).split(":").map(Number);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-  return hh * 60 + mm;
-}
-function nowInTimeZone(tz: string | null) {
+function nowInTz(tz: string | null) {
   const timeZone = tz || "Europe/Rome";
   const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
+    timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit",
+    year: "numeric", month: "2-digit", day: "2-digit", weekday: "long",
   }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return {
+    year: Number(get("year")), month: Number(get("month")), day: Number(get("day")),
+    hour: Number(get("hour")), minute: Number(get("minute")), second: Number(get("second")),
+    weekday: get("weekday"), timeZone,
+  };
+}
 
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const year = Number(get("year"));
-  const month = Number(get("month"));
-  const day = Number(get("day"));
-  const hour = Number(get("hour"));
-  const minute = Number(get("minute"));
-  const second = Number(get("second"));
-  const weekday = get("weekday");
-  return { year, month, day, hour, minute, second, weekday, timeZone };
-}
-function ymdFromClock(c: ReturnType<typeof nowInTimeZone>) {
-  return `${c.year}-${two(c.month)}-${two(c.day)}`;
-}
-function computeNextPrayer(prayers: PrayerRow[], tz: string | null) {
-  const n = nowInTimeZone(tz);
-  const today = ymdFromClock(n);
-  const minutesNow = n.hour * 60 + n.minute;
+const ymd = (c: ReturnType<typeof nowInTz>) => `${c.year}-${two(c.month)}-${two(c.day)}`;
+
+function getNextPrayer(prayers: PrayerRow[], tz: string | null) {
+  const n = nowInTz(tz);
+  const today = ymd(n);
+  const nowM = n.hour * 60 + n.minute;
   const todayRows = prayers.filter((p) => p.date === today);
-
   for (const key of PRAYER_ORDER) {
     const row = todayRows.find((r) => r.prayer === key);
     if (!row) continue;
-    const mins = timeToMinutes(row.jamaat_time);
-    if (mins == null) continue;
-    if (mins >= minutesNow) return { prayer: key, mins };
-  }
-
-  const first = todayRows.find((r) => r.prayer === "fajr") ?? null;
-  if (first) {
-    const mins = timeToMinutes(first.jamaat_time);
-    if (mins != null) return { prayer: "fajr" as PrayerKey, mins };
+    const mins = timeToMins(row.jamaat_time);
+    if (mins != null && mins >= nowM) return { key, row, mins, diff: mins - nowM };
   }
   return null;
-}
-function computeNextJumuah(jumuah: JumuahRow[], tz: string | null) {
-  const n = nowInTimeZone(tz);
-  const minutesNow = n.hour * 60 + n.minute;
-  for (const row of jumuah) {
-    const mins = timeToMinutes(row.khutbah_time);
-    if (mins == null) continue;
-    if (mins >= minutesNow) return { row, mins };
-  }
-  return null;
-}
-function msUntilNextSecond() {
-  const now = new Date();
-  return 1000 - now.getMilliseconds();
-}
-
-/** Fullscreen helpers */
-function canFullscreen() {
-  return (
-    typeof document !== "undefined" && !!document.documentElement.requestFullscreen
-  );
-}
-async function enterFullscreen() {
-  try {
-    if (!canFullscreen()) return;
-    if (document.fullscreenElement) return;
-    await document.documentElement.requestFullscreen();
-  } catch {}
-}
-async function exitFullscreen() {
-  try {
-    if (!document.fullscreenElement) return;
-    await document.exitFullscreen();
-  } catch {}
 }
 
 function wxEmoji(code?: number | null) {
@@ -179,838 +81,811 @@ function wxEmoji(code?: number | null) {
   if (code === 0) return "☀️";
   if ([1, 2, 3].includes(code)) return "⛅";
   if ([45, 48].includes(code)) return "🌫️";
-  if ([51, 53, 55, 56, 57].includes(code)) return "🌦️";
-  if ([61, 63, 65, 66, 67].includes(code)) return "🌧️";
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "🌧️";
   if ([71, 73, 75, 77].includes(code)) return "🌨️";
-  if ([80, 81, 82].includes(code)) return "🌧️";
   if ([95, 96, 99].includes(code)) return "⛈️";
   return "⛅";
 }
 
+const formatCountdown = (mins: number) => {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+};
+
+/* =========================================================
+   Slide Components - Each is a full-screen minimal experience
+   ========================================================= */
+
+// Shared wrapper for all slides
+const SlideWrapper: React.FC<{ children: React.ReactNode; gradient?: string }> = ({ children, gradient }) => (
+  <div className="absolute inset-0 flex flex-col items-center justify-center p-12 overflow-hidden">
+    {gradient && <div className={`absolute inset-0 ${gradient} opacity-30`} />}
+    <div className="relative z-10 w-full max-w-6xl">{children}</div>
+  </div>
+);
+
+// 1. Welcome Slide
+const WelcomeSlide: React.FC<{ masjid: Masjid; clock: ReturnType<typeof nowInTz> }> = ({ masjid, clock }) => (
+  <SlideWrapper gradient="bg-gradient-to-br from-emerald-900/50 via-transparent to-cyan-900/30">
+    <div className="text-center">
+      <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-white/5 border border-white/10 mb-8">
+        <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
+        <span className="text-lg text-white/70 uppercase tracking-[0.3em]">Live Display</span>
+      </div>
+      
+      <h1 className="text-[clamp(3rem,8vw,8rem)] font-black leading-none text-white">
+        {masjid.short_name || masjid.official_name}
+      </h1>
+      
+      {masjid.city && (
+        <p className="mt-6 text-[clamp(1.5rem,3vw,2.5rem)] text-white/50">{masjid.city}</p>
+      )}
+      
+      <div className="mt-12 flex items-center justify-center gap-8">
+        <div className="text-center">
+          <div className="text-sm uppercase tracking-[0.3em] text-white/40 mb-2">{clock.weekday}</div>
+          <div className="text-4xl font-bold text-white/80">
+            {two(clock.day)}.{two(clock.month)}.{clock.year}
+          </div>
+        </div>
+        <div className="w-px h-16 bg-white/20" />
+        <div className="text-center">
+          <div className="text-sm uppercase tracking-[0.3em] text-white/40 mb-2">Local Time</div>
+          <div className="text-4xl font-bold text-white/80 tabular-nums">
+            {two(clock.hour)}:{two(clock.minute)}
+          </div>
+        </div>
+      </div>
+    </div>
+  </SlideWrapper>
+);
+
+// 2. Clock Slide - Big beautiful clock
+const ClockSlide: React.FC<{ clock: ReturnType<typeof nowInTz>; next: ReturnType<typeof getNextPrayer> }> = ({ clock, next }) => (
+  <SlideWrapper>
+    <div className="text-center">
+      <div className="text-[clamp(8rem,20vw,16rem)] font-black leading-none text-white tabular-nums">
+        {two(clock.hour)}:{two(clock.minute)}
+        <span className="text-white/30">:{two(clock.second)}</span>
+      </div>
+      
+      <div className="mt-8 text-3xl text-white/50">
+        {clock.weekday}, {two(clock.day)}.{two(clock.month)}.{clock.year}
+      </div>
+      
+      {next && (
+        <div className="mt-12 inline-flex items-center gap-4 px-8 py-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30">
+          <span className="text-2xl">{PRAYER_ICONS[next.key]}</span>
+          <span className="text-2xl text-white/70">Next:</span>
+          <span className="text-2xl font-bold text-white">{PRAYER_LABELS[next.key]}</span>
+          <span className="text-2xl text-emerald-400 font-bold">in {formatCountdown(next.diff)}</span>
+        </div>
+      )}
+    </div>
+  </SlideWrapper>
+);
+
+// 3. All Prayers Slide - Clean grid
+const PrayersSlide: React.FC<{ prayers: PrayerRow[]; next: ReturnType<typeof getNextPrayer>; tz: string }> = ({ prayers, next, tz }) => (
+  <SlideWrapper gradient="bg-gradient-to-b from-slate-900/50 to-transparent">
+    <div className="text-center mb-12">
+      <div className="text-sm uppercase tracking-[0.4em] text-emerald-400 mb-4">Todays Schedule</div>
+      <h2 className="text-5xl font-black text-white">Prayer Times</h2>
+    </div>
+    
+    <div className="grid grid-cols-5 gap-6">
+      {PRAYER_ORDER.map((key) => {
+        const row = prayers.find((p) => p.prayer === key);
+        const isNext = next?.key === key;
+        
+        return (
+          <div
+            key={key}
+            className={`relative rounded-3xl p-8 text-center transition-all ${
+              isNext
+                ? "bg-emerald-500 text-emerald-950 scale-105 shadow-2xl shadow-emerald-500/30"
+                : "bg-white/5 text-white border border-white/10"
+            }`}
+          >
+            {isNext && (
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-white text-emerald-950 text-xs font-bold uppercase tracking-wider">
+                Next
+              </div>
+            )}
+            
+            <div className="text-4xl mb-4">{PRAYER_ICONS[key]}</div>
+            <div className={`text-2xl font-bold mb-6 ${isNext ? "" : "text-white/90"}`}>
+              {PRAYER_LABELS[key]}
+            </div>
+            
+            <div className={`text-sm uppercase tracking-wider mb-2 ${isNext ? "text-emerald-950/60" : "text-white/40"}`}>
+              Adhan
+            </div>
+            <div className={`text-3xl font-bold tabular-nums mb-6 ${isNext ? "" : "text-white/70"}`}>
+              {formatTime(row?.start_time)}
+            </div>
+            
+            <div className={`text-sm uppercase tracking-wider mb-2 ${isNext ? "text-emerald-950/60" : "text-white/40"}`}>
+              Iqama
+            </div>
+            <div className={`text-4xl font-black tabular-nums ${isNext ? "" : ""}`}>
+              {formatTime(row?.jamaat_time)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </SlideWrapper>
+);
+
+// 4. Next Prayer Focus - Dramatic single prayer highlight
+const NextPrayerSlide: React.FC<{ next: ReturnType<typeof getNextPrayer>; clock: ReturnType<typeof nowInTz> }> = ({ next, clock }) => {
+  if (!next) return null;
+  
+  return (
+    <SlideWrapper gradient="bg-gradient-to-br from-emerald-900/40 via-transparent to-emerald-900/20">
+      <div className="text-center">
+        <div className="text-8xl mb-8">{PRAYER_ICONS[next.key]}</div>
+        
+        <div className="text-sm uppercase tracking-[0.4em] text-emerald-400 mb-4">Coming Up</div>
+        <h2 className="text-[clamp(4rem,10vw,10rem)] font-black text-white leading-none">
+          {PRAYER_LABELS[next.key]}
+        </h2>
+        
+        <div className="mt-12 flex items-center justify-center gap-12">
+          <div className="text-center">
+            <div className="text-sm uppercase tracking-[0.3em] text-white/40 mb-3">Iqama At</div>
+            <div className="text-6xl font-black text-white tabular-nums">{formatTime(next.row.jamaat_time)}</div>
+          </div>
+          
+          <div className="w-px h-24 bg-white/20" />
+          
+          <div className="text-center">
+            <div className="text-sm uppercase tracking-[0.3em] text-white/40 mb-3">Starting In</div>
+            <div className="text-6xl font-black text-emerald-400">{formatCountdown(next.diff)}</div>
+          </div>
+        </div>
+        
+        <div className="mt-12 text-2xl text-white/40">
+          Current time: {two(clock.hour)}:{two(clock.minute)}
+        </div>
+      </div>
+    </SlideWrapper>
+  );
+};
+
+// 5. Jumu'ah Slide
+const JumuahSlide: React.FC<{ slots: JumuahRow[] }> = ({ slots }) => (
+  <SlideWrapper gradient="bg-gradient-to-br from-amber-900/30 via-transparent to-emerald-900/20">
+    <div className="text-center mb-12">
+      <div className="text-7xl mb-6">🕌</div>
+      <div className="text-sm uppercase tracking-[0.4em] text-amber-400 mb-4">Friday Special</div>
+      <h2 className="text-6xl font-black text-white">Jumuah</h2>
+    </div>
+    
+    <div className={`grid gap-6 ${slots.length === 1 ? "max-w-lg mx-auto" : slots.length === 2 ? "grid-cols-2 max-w-3xl mx-auto" : "grid-cols-3"}`}>
+      {slots.map((slot) => (
+        <div key={slot.id} className="rounded-3xl bg-white/5 border border-white/10 p-8 text-center">
+          <div className="text-sm uppercase tracking-wider text-white/40 mb-2">Slot {slot.slot}</div>
+          {slot.language && (
+            <div className="inline-block px-4 py-1 rounded-full bg-amber-500/20 text-amber-300 text-sm font-medium mb-6">
+              {slot.language}
+            </div>
+          )}
+          
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="rounded-2xl bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Khutbah</div>
+              <div className="text-3xl font-black text-white tabular-nums">{formatTime(slot.khutbah_time)}</div>
+            </div>
+            <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/30 p-4">
+              <div className="text-xs uppercase tracking-wider text-emerald-400/70 mb-2">Iqama</div>
+              <div className="text-3xl font-black text-emerald-400 tabular-nums">{formatTime(slot.jamaat_time)}</div>
+            </div>
+          </div>
+          
+          {slot.notes && <div className="mt-4 text-sm text-white/50">{slot.notes}</div>}
+        </div>
+      ))}
+    </div>
+  </SlideWrapper>
+);
+
+// 6. Announcement Slide - One announcement at a time
+const AnnouncementSlide: React.FC<{ announcement: AnnouncementRow }> = ({ announcement }) => (
+  <SlideWrapper gradient={announcement.is_pinned ? "bg-gradient-to-br from-amber-900/30 via-transparent to-transparent" : "bg-gradient-to-br from-cyan-900/20 via-transparent to-transparent"}>
+    <div className="text-center max-w-4xl mx-auto">
+      {announcement.is_pinned && (
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/20 border border-amber-500/30 mb-8">
+          <span className="text-xl">📌</span>
+          <span className="text-amber-300 font-medium uppercase tracking-wider">Pinned</span>
+        </div>
+      )}
+      
+      <div className="text-sm uppercase tracking-[0.4em] text-white/40 mb-6">Announcement</div>
+      
+      <h2 className="text-[clamp(2.5rem,5vw,4rem)] font-black text-white leading-tight">
+        {announcement.title}
+      </h2>
+      
+      <div className="mt-8 text-[clamp(1.25rem,2.5vw,1.75rem)] text-white/70 leading-relaxed">
+        {announcement.body}
+      </div>
+      
+      <div className="mt-12 inline-block px-6 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 uppercase tracking-wider text-sm">
+        {announcement.category}
+      </div>
+    </div>
+  </SlideWrapper>
+);
+
+// 7. Weather Slide
+const WeatherSlide: React.FC<{ weather: WeatherOut }> = ({ weather }) => (
+  <SlideWrapper gradient="bg-gradient-to-br from-cyan-900/30 via-transparent to-blue-900/20">
+    <div className="text-center mb-12">
+      <div className="text-sm uppercase tracking-[0.4em] text-cyan-400 mb-4">Local Weather</div>
+      <h2 className="text-5xl font-black text-white">{weather.location.name}</h2>
+    </div>
+    
+    {weather.current && (
+      <div className="text-center mb-16">
+        <div className="text-[8rem] leading-none mb-4">{wxEmoji(weather.current.weathercode)}</div>
+        <div className="text-[clamp(4rem,10vw,8rem)] font-black text-white">
+          {weather.current.temperature != null ? `${Math.round(weather.current.temperature)}°` : "—"}
+        </div>
+      </div>
+    )}
+    
+    <div className="grid grid-cols-3 gap-6 max-w-3xl mx-auto">
+      {weather.daily.slice(0, 3).map((d) => (
+        <div key={d.date} className="rounded-3xl bg-white/5 border border-white/10 p-6 text-center">
+          <div className="text-lg text-white/50 mb-4">{d.date.slice(5)}</div>
+          <div className="text-5xl mb-4">{wxEmoji(d.weathercode)}</div>
+          <div className="text-2xl font-bold text-white">
+            {d.tmax != null ? Math.round(d.tmax) : "—"}°
+            <span className="text-white/40 mx-2">/</span>
+            {d.tmin != null ? Math.round(d.tmin) : "—"}°
+          </div>
+        </div>
+      ))}
+    </div>
+  </SlideWrapper>
+);
+
+// 8. Hadith Slide
+const HadithSlide: React.FC<{ hadith: HadithOut }> = ({ hadith }) => (
+  <SlideWrapper gradient="bg-gradient-to-br from-violet-900/20 via-transparent to-emerald-900/10">
+    <div className="text-center max-w-4xl mx-auto">
+      <div className="text-6xl mb-8">📖</div>
+      <div className="text-sm uppercase tracking-[0.4em] text-violet-400 mb-6">Daily Hadith</div>
+      
+      <blockquote className="text-[clamp(1.5rem,3vw,2.25rem)] text-white/90 leading-relaxed">
+        <span className="text-emerald-400 text-4xl font-serif">&ldquo;</span>
+        {hadith.text}
+        <span className="text-emerald-400 text-4xl font-serif">&rdquo;</span>
+      </blockquote>
+      
+      <div className="mt-12 flex items-center justify-center gap-4 text-white/50">
+        <span className="text-lg">{hadith.collection}</span>
+        <span className="text-white/20">•</span>
+        <span className="text-lg">#{hadith.hadithnumber}</span>
+        {hadith.grade && (
+          <>
+            <span className="text-white/20">•</span>
+            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-sm">{hadith.grade}</span>
+          </>
+        )}
+      </div>
+    </div>
+  </SlideWrapper>
+);
+
+// 9. QR/Download Slide
+const QRSlide: React.FC<{ masjid: Masjid }> = ({ masjid }) => (
+  <SlideWrapper gradient="bg-gradient-to-br from-emerald-900/30 via-transparent to-cyan-900/20">
+    <div className="flex items-center justify-center gap-20">
+      <div className="text-center">
+        <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 mb-8">
+          <div className="w-3 h-3 rounded-full bg-emerald-400" />
+          <span className="text-emerald-300 uppercase tracking-[0.3em]">UmmahWay App</span>
+        </div>
+        
+        <h2 className="text-5xl font-black text-white mb-6">
+          Get Prayer Times<br />on Your Phone
+        </h2>
+        
+        <p className="text-xl text-white/50 max-w-md">
+          Scan the QR code to download the app and connect with {masjid.short_name || masjid.official_name}
+        </p>
+      </div>
+      
+      <div className="rounded-3xl bg-white p-6 shadow-2xl shadow-emerald-500/20">
+        <QRCode value={PLAY_STORE_URL} size={200} />
+      </div>
+    </div>
+  </SlideWrapper>
+);
+
+/* =========================================================
+   Masjid Selector - Shows when no masjid is selected
+   ========================================================= */
+type SelectableMasjid = {
+  id: string;
+  official_name: string;
+  short_name?: string | null;
+  city: string | null;
+  region?: string | null;
+  is_active: boolean;
+};
+
+const MasjidSelector: React.FC = () => {
+  const router = useRouter();
+  const [masjids, setMasjids] = useState<SelectableMasjid[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("public_masjids")
+        .select("id, official_name, short_name, city, region, is_active")
+        .eq("is_active", true)
+        .order("city")
+        .order("official_name");
+      setMasjids((data ?? []) as SelectableMasjid[]);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  // Get unique cities
+  const cities = useMemo(() => {
+    const citySet = new Set(masjids.map((m) => m.city).filter(Boolean));
+    return Array.from(citySet).sort() as string[];
+  }, [masjids]);
+
+  // Filter masjids
+  const filteredMasjids = useMemo(() => {
+    return masjids.filter((m) => {
+      const matchesCity = !selectedCity || m.city === selectedCity;
+      const matchesSearch = !searchQuery || 
+        m.official_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (m.short_name?.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (m.city?.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesCity && matchesSearch;
+    });
+  }, [masjids, selectedCity, searchQuery]);
+
+  const selectMasjid = (id: string) => {
+    router.push(`/?masjid=${id}`);
+  };
+
+  return (
+    <div className="fixed inset-0 noor-bg text-white overflow-hidden">
+      <div className="noise" />
+      
+      {/* Background gradients */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative z-10 h-full flex flex-col p-8 lg:p-12">
+        {/* Header */}
+        <div className="text-center mb-8 lg:mb-12">
+          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 mb-6">
+            <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-emerald-300 uppercase tracking-[0.3em] text-sm">TV Display Setup</span>
+          </div>
+          
+          <h1 className="text-4xl lg:text-6xl font-black mb-4">Select Your Masjid</h1>
+          <p className="text-xl text-white/50 max-w-2xl mx-auto">
+            Choose a masjid to display prayer times, announcements, and more
+          </p>
+        </div>
+
+        {/* Search & Filters */}
+        <div className="flex flex-col lg:flex-row items-center justify-center gap-4 mb-8">
+          {/* Search */}
+          <div className="relative w-full max-w-md">
+            <input
+              type="text"
+              placeholder="Search masjids..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-lg focus:outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all"
+            />
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
+
+          {/* City filter */}
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <button
+              onClick={() => setSelectedCity(null)}
+              className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                !selectedCity
+                  ? "bg-emerald-500 text-emerald-950"
+                  : "bg-white/5 text-white/70 hover:bg-white/10 border border-white/10"
+              }`}
+            >
+              All Cities
+            </button>
+            {cities.map((city) => (
+              <button
+                key={city}
+                onClick={() => setSelectedCity(city)}
+                className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                  selectedCity === city
+                    ? "bg-emerald-500 text-emerald-950"
+                    : "bg-white/5 text-white/70 hover:bg-white/10 border border-white/10"
+                }`}
+              >
+                {city}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Masjid Grid */}
+        <div className="flex-1 overflow-auto min-h-0">
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="w-12 h-12 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin" />
+            </div>
+          ) : filteredMasjids.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="text-6xl mb-4">🕌</div>
+              <p className="text-xl text-white/50">No masjids found</p>
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(""); setSelectedCity(null); }}
+                  className="mt-4 px-6 py-3 rounded-xl bg-white/10 text-white/70 hover:bg-white/20 transition-all"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6 pb-8">
+              {filteredMasjids.map((masjid) => (
+                <button
+                  key={masjid.id}
+                  onClick={() => selectMasjid(masjid.id)}
+                  className="group relative rounded-3xl bg-white/5 border border-white/10 p-6 text-left transition-all hover:bg-white/10 hover:border-emerald-500/30 hover:scale-[1.02] hover:shadow-xl hover:shadow-emerald-500/10"
+                >
+                  {/* Hover glow */}
+                  <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  
+                  <div className="relative z-10">
+                    {/* Icon */}
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 group-hover:bg-emerald-500/20 transition-colors">
+                      <span className="text-2xl">🕌</span>
+                    </div>
+
+                    {/* Name */}
+                    <h3 className="text-xl font-bold text-white mb-1 line-clamp-2">
+                      {masjid.short_name || masjid.official_name}
+                    </h3>
+
+                    {/* Location */}
+                    {masjid.city && (
+                      <p className="text-white/50 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        {masjid.city}
+                        {masjid.region && <span className="text-white/30">· {masjid.region}</span>}
+                      </p>
+                    )}
+
+                    {/* Arrow */}
+                    <div className="absolute bottom-6 right-6 w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                      <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto pt-6 flex items-center justify-between border-t border-white/10">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
+              <span className="text-sm font-bold text-white">UW</span>
+            </div>
+            <div>
+              <div className="font-semibold text-white">UmmahWay TV</div>
+              <div className="text-sm text-white/50">Digital Masjid Display</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-6 text-sm text-white/40">
+            <div>
+              <span className="text-white/60">{masjids.length}</span> masjids available
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* =========================================================
+   Main Component
+   ========================================================= */
 export default function TVClient() {
   const sp = useSearchParams();
-
   const masjidId = sp.get("masjid");
-  const cycleSec = Math.max(8, Number(sp.get("cycle") ?? 14));
+  const cycleSec = Math.max(6, Number(sp.get("cycle") ?? 10));
   const tzOverride = sp.get("tz");
 
+  // If no masjid ID, show the selector
+  if (!masjidId) {
+    return <MasjidSelector />;
+  }
+
+  return <TVDisplay masjidId={masjidId} cycleSec={cycleSec} tzOverride={tzOverride} />;
+}
+
+/* =========================================================
+   TV Display Component (separated for cleaner code)
+   ========================================================= */
+function TVDisplay({ masjidId, cycleSec, tzOverride }: { masjidId: string; cycleSec: number; tzOverride: string | null }) {
+  const router = useRouter();
   const alive = useRef(true);
 
   const [masjid, setMasjid] = useState<Masjid | null>(null);
   const [prayers, setPrayers] = useState<PrayerRow[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
-  const [jumuahTimes, setJumuahTimes] = useState<JumuahRow[]>([]);
+  const [jumuahSlots, setJumuahSlots] = useState<JumuahRow[]>([]);
   const [weather, setWeather] = useState<WeatherOut | null>(null);
   const [hadith, setHadith] = useState<HadithOut | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [bootError, setBootError] = useState<string | null>(null);
-
-  const [clock, setClock] = useState(() => nowInTimeZone("Europe/Rome"));
+  const [clock, setClock] = useState(() => nowInTz("Europe/Rome"));
   const tz = tzOverride || masjid?.timezone || "Europe/Rome";
-  const todayKey = useMemo(() => ymdFromClock(clock), [clock]);
+  const todayKey = useMemo(() => ymd(clock), [clock]);
+  const isFriday = clock.weekday === "Friday";
 
-  const isFriday = clock.weekday === "Fri";
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const [slide, setSlide] = useState<SlideKey>("board");
-  const [slideProgress, setSlideProgress] = useState(0);
-
-  const [fullscreenPrompt, setFullscreenPrompt] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // ✅ HARD LOCK PAGE SCROLL (TV: never scroll)
+  // Lock scroll
   useEffect(() => {
-    const prevHtml = document.documentElement.style.overflow;
-    const prevBody = document.body.style.overflow;
-    const prevHtmlH = document.documentElement.style.height;
-    const prevBodyH = document.body.style.height;
-
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
-    document.documentElement.style.height = "100%";
-    document.body.style.height = "100%";
-
     return () => {
-      document.documentElement.style.overflow = prevHtml;
-      document.body.style.overflow = prevBody;
-      document.documentElement.style.height = prevHtmlH;
-      document.body.style.height = prevBodyH;
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
     };
   }, []);
 
-  // Track fullscreen state
+  // Clock tick
   useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
-    onFs();
-    document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
-  }, []);
-
-  // Global key handlers
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key.toLowerCase() === "f") {
-        enterFullscreen().then(() => setFullscreenPrompt(false));
-      }
-      if (e.key === "Escape") exitFullscreen();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Smooth clock in masjid timezone
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      setClock(nowInTimeZone(tz));
-      timer = setTimeout(tick, msUntilNextSecond());
-    };
-    timer = setTimeout(tick, msUntilNextSecond());
-    return () => clearTimeout(timer);
+    const tick = () => setClock(nowInTz(tz));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, [tz]);
 
-  // auto-reduce counts on smaller TVs (guarantee no overflow)
-  const [maxAnnFull, setMaxAnnFull] = useState(6);
-  const [maxAnnPreview, setMaxAnnPreview] = useState(3);
-  useEffect(() => {
-    const calc = () => {
-      const h = window.innerHeight;
-      // safe defaults for 720p / small displays
-      setMaxAnnFull(h < 820 ? 4 : 6);
-      setMaxAnnPreview(h < 820 ? 2 : 3);
-    };
-    calc();
-    window.addEventListener("resize", calc);
-    return () => window.removeEventListener("resize", calc);
-  }, []);
+  // Load data
+  const loadData = async (mId: string) => {
+    try {
+      const { data: m } = await supabase.from("public_masjids").select("*").eq("id", mId).maybeSingle();
+      if (!m) throw new Error("Masjid not found");
+      if (!alive.current) return;
+      setMasjid(m as Masjid);
 
-  function filterActiveByDate<T extends { valid_from: string | null; valid_to: string | null }>(
-    rows: T[],
-    ymd: string
-  ) {
-    return rows.filter((r) => {
-      const fromOk = !r.valid_from || r.valid_from <= ymd;
-      const toOk = !r.valid_to || r.valid_to >= ymd;
-      return fromOk && toOk;
-    });
-  }
+      const today = ymd(nowInTz(tz));
 
-  async function loadAll(mId: string) {
-    const { data: m, error: mErr } = await supabase
-      .from("public_masjids")
-      .select("id, official_name, city, timezone, latitude, longitude")
-      .eq("id", mId)
-      .maybeSingle();
+      const { data: p } = await supabase.from("masjid_prayer_times").select("*").eq("masjid_id", mId).eq("date", today);
+      if (alive.current) setPrayers((p ?? []) as PrayerRow[]);
 
-    if (mErr || !m) throw new Error("Masjid not found or not public.");
-    if (!alive.current) return;
+      const { data: a } = await supabase.from("masjid_announcements").select("*").eq("masjid_id", mId)
+        .or("starts_at.is.null,starts_at.lte.now()").or("ends_at.is.null,ends_at.gte.now()")
+        .order("is_pinned", { ascending: false }).limit(5);
+      if (alive.current) setAnnouncements((a ?? []) as AnnouncementRow[]);
 
-    const masjidObj = m as Masjid;
-    setMasjid(masjidObj);
+      const { data: j } = await supabase.from("masjid_jumuah_times").select("*").eq("masjid_id", mId).order("slot").limit(4);
+      if (alive.current) {
+        const active = (j ?? []).filter((r: JumuahRow) => (!r.valid_from || r.valid_from <= today) && (!r.valid_to || r.valid_to >= today));
+        setJumuahSlots(active as JumuahRow[]);
+      }
 
-    const today = todayKey;
+      // Weather
+      if (m.city || m.latitude) {
+        const qs = new URLSearchParams();
+        if (m.city) qs.set("city", m.city);
+        qs.set("tz", tz);
+        if (m.latitude) qs.set("lat", String(m.latitude));
+        if (m.longitude) qs.set("lon", String(m.longitude));
+        fetch(`/api/weather?${qs}`).then((r) => r.ok ? r.json() : null).then((d) => alive.current && d && setWeather(d)).catch(() => {});
+      }
 
-    const { data: p } = await supabase
-      .from("masjid_prayer_times")
-      .select("prayer, start_time, jamaat_time, date")
-      .eq("masjid_id", mId)
-      .eq("date", today);
-
-    if (!alive.current) return;
-    setPrayers((p ?? []) as PrayerRow[]);
-
-    const { data: a } = await supabase
-      .from("masjid_announcements")
-      .select("id, title, body, category, is_pinned, starts_at, ends_at, created_at")
-      .eq("masjid_id", mId)
-      .or("starts_at.is.null,starts_at.lte.now()")
-      .or("ends_at.is.null,ends_at.gte.now()")
-      .order("is_pinned", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (!alive.current) return;
-    setAnnouncements((a ?? []) as AnnouncementRow[]);
-
-    // ✅ Jumu'ah timings always loaded (independent from Friday)
-    const { data: jt } = await supabase
-      .from("masjid_jumuah_times")
-      .select("id, slot, khutbah_time, jamaat_time, language, notes, valid_from, valid_to")
-      .eq("masjid_id", mId)
-      .order("slot", { ascending: true })
-      .limit(10);
-
-    if (!alive.current) return;
-    // show current active schedule based on date range
-    setJumuahTimes(filterActiveByDate((jt ?? []) as JumuahRow[], today));
-
-    // Weather
-    if (masjidObj.city || (masjidObj.latitude != null && masjidObj.longitude != null)) {
-      const qs = new URLSearchParams();
-      if (masjidObj.city) qs.set("city", masjidObj.city);
-      qs.set("tz", tz);
-      if (masjidObj.latitude != null) qs.set("lat", String(masjidObj.latitude));
-      if (masjidObj.longitude != null) qs.set("lon", String(masjidObj.longitude));
-
-      fetch(`/api/weather?${qs.toString()}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => alive.current && j && setWeather(j))
-        .catch(() => {});
+      // Hadith
+      fetch(`/api/hadith?edition=eng-bukhari&seed=${today}:${mId}`).then((r) => r.ok ? r.json() : null).then((d) => alive.current && d && setHadith(d)).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Load failed");
     }
+  };
 
-    // Hadith
-    {
-      const qs = new URLSearchParams();
-      qs.set("edition", "eng-bukhari");
-      qs.set("seed", `${today}:${mId}`);
-      fetch(`/api/hadith?${qs.toString()}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => alive.current && j && setHadith(j))
-        .catch(() => {});
-    }
-  }
-
-  // Boot + reload when day changes
   useEffect(() => {
     alive.current = true;
-    setBootError(null);
-
-    if (!masjidId) {
-      setBootError("Missing masjid id. Use: ?masjid=<UUID>");
-      return () => {
-        alive.current = false;
-      };
-    }
-
-    (async () => {
-      try {
-        await loadAll(masjidId);
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : "Could not load TV data.";
-        setBootError(message);
-      }
-    })();
-
-    return () => {
-      alive.current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadData(masjidId);
+    return () => { alive.current = false; };
   }, [masjidId, todayKey]);
 
-  // Realtime refresh
+  // Build slides array
+  const slides = useMemo(() => {
+    const arr: SlideType[] = ["welcome", "clock", "prayers"];
+    const next = getNextPrayer(prayers, tz);
+    if (next) arr.push("next-prayer");
+    if (isFriday && jumuahSlots.length > 0) arr.push("jumuah");
+    announcements.forEach(() => arr.push("announcement"));
+    if (weather) arr.push("weather");
+    if (hadith) arr.push("hadith");
+    arr.push("qr");
+    return arr;
+  }, [prayers, tz, isFriday, jumuahSlots, announcements, weather, hadith]);
+
+  // Slide rotation
   useEffect(() => {
-    if (!masjidId) return;
+    if (slides.length === 0) return;
 
-    const channel = supabase
-      .channel(`tv:${masjidId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "masjid_prayer_times", filter: `masjid_id=eq.${masjidId}` },
-        async () => { try { await loadAll(masjidId); } catch {} }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "masjid_announcements", filter: `masjid_id=eq.${masjidId}` },
-        async () => { try { await loadAll(masjidId); } catch {} }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "masjid_jumuah_times", filter: `masjid_id=eq.${masjidId}` },
-        async () => { try { await loadAll(masjidId); } catch {} }
-      )
-      .subscribe();
+    let startTime = Date.now();
+    setCurrentSlide(0);
+    setProgress(0);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masjidId, todayKey]);
+    const progressInterval = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      setProgress(Math.min(1, elapsed / cycleSec));
+    }, 50);
 
-  const activeJumuah = useMemo(
-    () => jumuahTimes.slice().sort((a, b) => a.slot - b.slot).slice(0, 3), // ✅ max 3 slots
-    [jumuahTimes]
-  );
-
-  // Slideshow: Jumu'ah slide only on Friday (concept), but timings always visible in header
-  useEffect(() => {
-    const slides: SlideKey[] = ["board"];
-    if (isFriday && activeJumuah.length > 0) slides.push("jumuah");
-    if (announcements.length > 0) slides.push("announcements");
-
-    let i = 0;
-    setSlide(slides[0]);
-    setSlideProgress(0);
-
-    const start = Date.now();
-
-    const progressTimer = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000;
-      const prog = (elapsed % cycleSec) / cycleSec;
-      setSlideProgress(prog);
-    }, 120);
-
-    const timer = setInterval(() => {
-      i = (i + 1) % slides.length;
-      setSlide(slides[i]);
+    const slideInterval = setInterval(() => {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentSlide((prev) => (prev + 1) % slides.length);
+        setIsTransitioning(false);
+        startTime = Date.now();
+        setProgress(0);
+      }, 300);
     }, cycleSec * 1000);
 
     return () => {
-      clearInterval(timer);
-      clearInterval(progressTimer);
+      clearInterval(progressInterval);
+      clearInterval(slideInterval);
     };
-  }, [cycleSec, announcements.length, isFriday, activeJumuah.length]);
+  }, [slides.length, cycleSec]);
 
-  const next = useMemo(() => computeNextPrayer(prayers, tz), [prayers, tz]);
-  const nextLabel = next ? PRAYER_LABEL[next.prayer] : "—";
+  const next = useMemo(() => getNextPrayer(prayers, tz), [prayers, tz, clock]);
 
-  const countdown = useMemo(() => {
-    if (!next) return "—";
-    const n = nowInTimeZone(tz);
-    const nowM = n.hour * 60 + n.minute;
-    let diff = next.mins - nowM;
-    if (diff < 0) diff += 24 * 60;
-    const h = Math.floor(diff / 60);
-    const m = diff % 60;
-    if (h <= 0) return `${m} min`;
-    return `${h}h ${m}m`;
-  }, [next, clock, tz]);
-
-  const nextJ = useMemo(
-    () => (isFriday ? computeNextJumuah(activeJumuah, tz) : null),
-    [activeJumuah, isFriday, tz]
-  );
-
-  const jumuahCountdown = useMemo(() => {
-    if (!isFriday || !nextJ) return null;
-    const n = nowInTimeZone(tz);
-    const nowM = n.hour * 60 + n.minute;
-    let diff = nextJ.mins - nowM;
-    if (diff < 0) diff = 0;
-    const h = Math.floor(diff / 60);
-    const m = diff % 60;
-    if (h <= 0) return `${m} min`;
-    return `${h}h ${m}m`;
-  }, [nextJ, isFriday, clock, tz]);
-
-  // UI states
-  if (bootError) {
+  // Error state
+  if (error) {
     return (
-      <div className="fixed inset-0 h-[100dvh] w-[100vw] overflow-hidden noor-bg text-white">
+      <div className="fixed inset-0 noor-bg text-white flex items-center justify-center p-8">
         <div className="noise" />
-        <div className="mx-auto flex h-full max-w-5xl items-center justify-center p-8">
-          <div className="glass w-full rounded-3xl p-10">
-            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
-            <div className="mt-4 text-3xl font-black">Could not load display</div>
-            <div className="mt-4 text-white/70">{bootError}</div>
-            <div className="mt-6 text-sm text-white/40">
-              Example URL: <span className="font-mono">/tv?masjid=&lt;UUID&gt;</span>
-            </div>
-          </div>
+        <div className="glass rounded-3xl p-12 text-center max-w-xl relative z-10">
+          <div className="text-6xl mb-6">⚠️</div>
+          <h1 className="text-3xl font-black mb-4">Display Error</h1>
+          <p className="text-white/60 text-lg mb-8">{error}</p>
+          <button
+            onClick={() => router.push("/")}
+            className="px-8 py-4 rounded-2xl bg-emerald-500 text-emerald-950 font-bold text-lg hover:bg-emerald-400 transition-colors"
+          >
+            Select a Masjid
+          </button>
         </div>
       </div>
     );
   }
 
+  // Loading state
   if (!masjid) {
     return (
-      <div className="fixed inset-0 h-[100dvh] w-[100vw] overflow-hidden noor-bg text-white">
+      <div className="fixed inset-0 noor-bg text-white flex items-center justify-center">
         <div className="noise" />
-        <div className="mx-auto flex h-full max-w-5xl items-center justify-center p-8">
-          <div className="glass w-full rounded-3xl p-10">
-            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
-            <div className="mt-4 text-3xl font-black">Loading…</div>
-            <div className="mt-2 text-white/60">Connecting to masjid feed</div>
-          </div>
+        <div className="text-center">
+          <div className="w-16 h-16 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin mx-auto mb-8" />
+          <h1 className="text-3xl font-black">Loading Display</h1>
+          <p className="mt-2 text-white/50">Connecting to masjid...</p>
         </div>
       </div>
     );
   }
 
-  const title = masjid.official_name;
-  const place = masjid.city ? `${masjid.city}` : "";
+  // Get current announcement for announcement slides
+  const announcementIndex = slides.slice(0, currentSlide + 1).filter((s) => s === "announcement").length - 1;
+
+  // Render current slide
+  const renderSlide = () => {
+    const slideType = slides[currentSlide];
+    switch (slideType) {
+      case "welcome": return <WelcomeSlide masjid={masjid} clock={clock} />;
+      case "clock": return <ClockSlide clock={clock} next={next} />;
+      case "prayers": return <PrayersSlide prayers={prayers} next={next} tz={tz} />;
+      case "next-prayer": return next ? <NextPrayerSlide next={next} clock={clock} /> : null;
+      case "jumuah": return <JumuahSlide slots={jumuahSlots} />;
+      case "announcement": return announcements[announcementIndex] ? <AnnouncementSlide announcement={announcements[announcementIndex]} /> : null;
+      case "weather": return weather ? <WeatherSlide weather={weather} /> : null;
+      case "hadith": return hadith ? <HadithSlide hadith={hadith} /> : null;
+      case "qr": return <QRSlide masjid={masjid} />;
+      default: return null;
+    }
+  };
 
   return (
-    <div
-      className="fixed inset-0 h-[100dvh] w-[100vw] overflow-hidden text-white"
-      onClick={() => {
-        if (!isFullscreen) enterFullscreen().then(() => setFullscreenPrompt(false));
-        else setFullscreenPrompt(false);
-      }}
-    >
-      <div className="absolute inset-0 noor-bg" />
+    <div className="fixed inset-0 noor-bg text-white overflow-hidden">
       <div className="noise" />
 
-      {/* Top-right fullscreen button */}
-      <div className="absolute right-4 top-4 z-20">
-        <button
-          className="glass rounded-2xl px-5 py-3 text-lg font-extrabold text-white/90 hover:text-white"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isFullscreen) exitFullscreen();
-            else enterFullscreen().then(() => setFullscreenPrompt(false));
-          }}
-        >
-          {isFullscreen ? "⤢ Exit" : "⛶ Fullscreen"}
-        </button>
-      </div>
-
-      {/* Fullscreen prompt overlay */}
-      {fullscreenPrompt && !isFullscreen && (
-        <div className="absolute inset-0 z-30 overflow-hidden flex items-center justify-center bg-black/55 p-6">
-          <div className="glass w-full max-w-4xl rounded-3xl p-10 text-center">
-            <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay TV</div>
-            <div className="mt-5 text-4xl md:text-5xl font-black">Press OK to go Fullscreen</div>
-            <div className="mt-4 text-lg md:text-xl text-white/70">
-              Click / press Enter once. After that, the display runs hands-free.
-            </div>
-            <div className="mt-8 text-sm text-white/40">Tip: On most remotes, OK = click.</div>
-            <div className="mt-10">
-              <button
-                className="rounded-2xl bg-emerald-400 px-8 py-4 text-xl font-black text-emerald-950"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  enterFullscreen().then(() => setFullscreenPrompt(false));
-                }}
-              >
-                Enter Fullscreen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Slide progress */}
-      <div className="absolute left-0 top-0 z-10 h-1 w-full bg-white/10">
+      {/* Progress bar */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-white/5 z-50">
         <div
-          className="h-full bg-emerald-400 transition-[width]"
-          style={{ width: `${Math.round(slideProgress * 100)}%` }}
+          className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-100"
+          style={{ width: `${progress * 100}%` }}
         />
       </div>
 
-      {/* Main shell */}
-      <div className="relative z-10 flex h-full w-full flex-col p-3 md:p-5">
-        {/* Header (never grows) */}
-        <div className="shrink-0 grid grid-cols-1 xl:grid-cols-12 gap-3 md:gap-5">
-          <div className="glass rounded-3xl px-5 py-4 xl:col-span-8 overflow-hidden">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-xs uppercase tracking-[0.35em] text-white/60">
-                  Prayer Times • Jamaat • Weather • Hadith
-                </div>
-                <div className="mt-2 text-[clamp(1.8rem,3.2vw,3.2rem)] font-black leading-tight truncate">
-                  {title}
-                </div>
-                {place && (
-                  <div className="mt-1 text-lg md:text-xl text-white/70 truncate">
-                    {place}
-                  </div>
-                )}
-              </div>
+      {/* Slide dots */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50">
+        {slides.map((_, i) => (
+          <div
+            key={i}
+            className={`w-2 h-2 rounded-full transition-all ${
+              i === currentSlide ? "bg-emerald-400 w-8" : "bg-white/20"
+            }`}
+          />
+        ))}
+      </div>
 
-              <div className="hidden md:flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <div className="text-xs uppercase tracking-[0.35em] text-white/50">UmmahWay</div>
-                  <div className="text-sm text-white/70">Scan to install</div>
-                </div>
-                <div className="rounded-2xl bg-white p-2">
-                  <QRCode value={PLAY_STORE_URL} size={58} />
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Branding */}
+      <div className="absolute bottom-8 right-8 flex items-center gap-4 z-50">
+        <div className="text-right">
+          <div className="text-xs uppercase tracking-[0.3em] text-white/40">Powered by</div>
+          <div className="text-lg font-bold text-white/70">UmmahWay</div>
+        </div>
+        <div className="rounded-xl bg-white p-2">
+          <QRCode value={PLAY_STORE_URL} size={48} />
+        </div>
+      </div>
 
-          <div className="glass rounded-3xl px-5 py-4 xl:col-span-4 overflow-hidden">
-            <div className="text-sm uppercase tracking-[0.32em] text-white/60">
-              {clock.weekday} • {two(clock.day)}/{two(clock.month)}/{clock.year}
-            </div>
-
-            <div className="tick mt-2 text-[clamp(2rem,3.6vw,3.6rem)] font-black">
-              {two(clock.hour)}:{two(clock.minute)}
-              <span className="text-white/40">:{two(clock.second)}</span>
-            </div>
-
-            <div className="mt-1 text-base md:text-lg text-white/70">
-              Next: <span className="font-black text-white">{nextLabel}</span>{" "}
-              <span className="text-white/50">in</span>{" "}
-              <span className="font-black text-emerald-300">{countdown}</span>
-            </div>
-
-            {/* ✅ Jumu'ah timings ALWAYS shown (up to 3 slots) */}
-            {activeJumuah.length > 0 && (
-              <div className="mt-2">
-                <div className="text-xs uppercase tracking-[0.32em] text-white/50">
-                  Jumu’ah (Fri) • All Jamaats
-                </div>
-
-                {/* small chips that cannot overflow height */}
-                <div className="mt-2 flex flex-wrap gap-2 overflow-hidden">
-                  {activeJumuah.map((j) => (
-                    <div
-                      key={j.id}
-                      className="max-w-full rounded-full bg-white/5 px-3 py-1 text-sm font-black text-white/85"
-                    >
-                      <span className="text-white/60">#{j.slot}</span>{" "}
-                      {formatTimeHHMM(j.khutbah_time)}→{formatTimeHHMM(j.jamaat_time)}
-                      {j.language ? <span className="text-white/50"> • {j.language}</span> : null}
-                    </div>
-                  ))}
-                </div>
-
-                {/* only on Friday show next countdown */}
-                {isFriday && nextJ?.row && jumuahCountdown && (
-                  <div className="mt-1 text-sm text-white/65">
-                    Next khutbah:{" "}
-                    <span className="font-black text-white">
-                      {formatTimeHHMM(nextJ.row.khutbah_time)}
-                    </span>{" "}
-                    <span className="text-white/50">in</span>{" "}
-                    <span className="font-black text-emerald-300">{jumuahCountdown}</span>
-                  </div>
-                )}
-              </div>
-            )}
+      {/* Current time badge */}
+      <div className="absolute top-8 right-8 z-50">
+        <div className="glass rounded-2xl px-6 py-3 flex items-center gap-4">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <div className="text-2xl font-bold tabular-nums">
+            {two(clock.hour)}:{two(clock.minute)}
+            <span className="text-white/30">:{two(clock.second)}</span>
           </div>
         </div>
+      </div>
 
-        {/* Slides (must be shrinkable) */}
-        <div className="mt-3 md:mt-4 flex-1 min-h-0 overflow-hidden">
-          {slide === "board" && (
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 md:gap-5 h-full min-h-0 overflow-hidden">
-              {/* Prayer panel */}
-              <div className="glass rounded-3xl p-5 xl:col-span-7 min-h-0 overflow-hidden">
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.35em] text-white/60">Today</div>
-                    <div className="mt-1 text-2xl md:text-3xl font-black">Prayer Schedule</div>
-                  </div>
-                  <div className="text-sm md:text-base text-white/60">
-                    Local <span className="font-black text-white/80">{tz}</span>
-                  </div>
-                </div>
+      {/* Back to selector button */}
+      <button
+        onClick={() => router.push("/")}
+        className="absolute top-8 left-8 z-50 glass rounded-2xl px-5 py-3 flex items-center gap-3 text-white/60 hover:text-white hover:bg-white/10 transition-all"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+        <span className="font-medium">Change Masjid</span>
+      </button>
 
-                <div className="mt-4 grid grid-cols-3 gap-3 text-white/85">
-                  <div className="text-sm font-extrabold text-white/55 uppercase tracking-widest">
-                    Prayer
-                  </div>
-                  <div className="text-sm font-extrabold text-white/55 uppercase tracking-widest text-center">
-                    Start
-                  </div>
-                  <div className="text-sm font-extrabold text-white/55 uppercase tracking-widest text-right">
-                    Jamaat
-                  </div>
-
-                  {PRAYER_ORDER.map((k) => {
-                    const row = prayers.find((p) => p.prayer === k);
-                    const isNext = next?.prayer === k;
-
-                    const cell = (extra: string) =>
-                      [
-                        "rounded-2xl px-4 py-4 font-black overflow-hidden",
-                        isNext ? "bg-emerald-400 text-emerald-950" : "bg-white/5",
-                        extra,
-                      ].join(" ");
-
-                    return (
-                      <React.Fragment key={k}>
-                        <div className={cell("text-xl md:text-2xl truncate")}>
-                          {PRAYER_LABEL[k]}
-                        </div>
-                        <div className={cell("tick text-center text-xl md:text-2xl")}>
-                          {row ? formatTimeHHMM(row.start_time) : "—"}
-                        </div>
-                        <div className={cell("tick text-right text-xl md:text-2xl")}>
-                          {row ? formatTimeHHMM(row.jamaat_time) : "—"}
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-4 text-xs md:text-sm text-white/45">
-                  Updates instantly from admin — TVs refresh automatically.
-                </div>
-              </div>
-
-              {/* Right column: Weather + Hadith + Announcements (no overflow) */}
-              <div className="xl:col-span-5 grid min-h-0 grid-rows-[auto,auto,1fr] gap-3 md:gap-5 overflow-hidden">
-                {/* Weather */}
-                <div className="glass rounded-3xl p-5 overflow-hidden">
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.35em] text-white/60">Weather</div>
-                      <div className="mt-1 text-2xl font-black">Outlook</div>
-                    </div>
-                    <div className="text-sm text-white/60 truncate max-w-[55%]">
-                      {weather?.location?.name ?? (masjid.city || "—")}
-                    </div>
-                  </div>
-
-                  {!weather ? (
-                    <div className="mt-3 rounded-2xl bg-white/5 p-4 text-white/60">Loading…</div>
-                  ) : (
-                    <>
-                      <div className="mt-3 flex items-center justify-between rounded-2xl bg-white/5 p-4">
-                        <div className="text-base text-white/75">Now</div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-2xl">{wxEmoji(weather.current?.weathercode ?? null)}</div>
-                          <div className="text-2xl font-black">
-                            {weather.current?.temperature != null
-                              ? `${Math.round(weather.current.temperature)}°C`
-                              : "—"}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-3 gap-3">
-                        {weather.daily.slice(0, 3).map((d) => (
-                          <div key={d.date} className="rounded-2xl bg-white/5 p-3 text-center overflow-hidden">
-                            <div className="text-xs text-white/60">{d.date.slice(5)}</div>
-                            <div className="mt-1 text-2xl">{wxEmoji(d.weathercode ?? null)}</div>
-                            <div className="mt-1 text-base font-black">
-                              {d.tmax != null ? Math.round(d.tmax) : "—"}°
-                              <span className="text-white/40"> / </span>
-                              {d.tmin != null ? Math.round(d.tmin) : "—"}°
-                            </div>
-                            <div className="mt-1 text-xs text-white/60">
-                              {d.precipProbMax != null ? `${Math.round(d.precipProbMax)}%` : "—"} rain
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Hadith */}
-                <div className="glass rounded-3xl p-5 overflow-hidden">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.35em] text-white/60">Hadith</div>
-                      <div className="mt-1 text-2xl font-black">Daily Reminder</div>
-                    </div>
-                    <div className="text-sm text-white/60 truncate max-w-[45%]">
-                      {hadith?.collection ?? "—"}
-                    </div>
-                  </div>
-
-                  {!hadith ? (
-                    <div className="mt-3 rounded-2xl bg-white/5 p-4 text-white/60">Loading…</div>
-                  ) : (
-                    <>
-                      <div className="mt-3 rounded-2xl bg-white/5 p-4 text-base leading-6 text-white/80 line-clamp-4">
-                        <span className="text-emerald-300 font-black">“</span>
-                        {hadith.text}
-                        <span className="text-emerald-300 font-black">”</span>
-                      </div>
-                      <div className="mt-2 text-xs text-white/50 truncate">
-                        #{hadith.hadithnumber}
-                        {hadith.grade ? ` • Grade: ${hadith.grade}` : ""}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Announcements preview (fills remainder, no overflow) */}
-                <div className="glass rounded-3xl p-5 min-h-0 overflow-hidden">
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.35em] text-white/60">Now</div>
-                      <div className="mt-1 text-2xl font-black">Announcements</div>
-                    </div>
-                    <div className="text-sm text-white/60">{announcements.length}</div>
-                  </div>
-
-                  <div className="mt-3 space-y-3 min-h-0 overflow-hidden">
-                    {announcements.slice(0, maxAnnPreview).map((a) => (
-                      <div key={a.id} className="rounded-3xl border border-white/10 bg-white/5 p-4 overflow-hidden">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-lg font-black leading-tight line-clamp-1">
-                            {a.title}
-                          </div>
-                          {a.is_pinned && (
-                            <div className="rounded-full bg-amber-300/20 px-3 py-1 text-[11px] font-black text-amber-200 shrink-0">
-                              PINNED
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-2 text-sm leading-5 text-white/70 line-clamp-2">
-                          {a.body}
-                        </div>
-                      </div>
-                    ))}
-
-                    {announcements.length === 0 && (
-                      <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-white/60">
-                        No announcements right now.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mt-3 text-xs text-white/45">
-                    Full list rotates on the announcements slide.
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {slide === "jumuah" && (
-            <div className="glass w-full h-full rounded-3xl p-6 md:p-8 overflow-hidden">
-              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
-                <div className="min-w-0">
-                  <div className="text-xs uppercase tracking-[0.35em] text-white/60">Friday Special</div>
-                  <div className="mt-2 text-[clamp(2rem,3.6vw,3.6rem)] font-black truncate">
-                    Jumu’ah✨
-                  </div>
-                  <div className="mt-2 text-lg text-white/70 line-clamp-2">
-                    {nextJ?.row
-                      ? `Next khutbah at ${formatTimeHHMM(nextJ.row.khutbah_time)} (in ${jumuahCountdown})`
-                      : "May Allah accept your Jumu’ah."}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 shrink-0">
-                  <div className="rounded-3xl bg-white p-3">
-                    <QRCode value={PLAY_STORE_URL} size={98} />
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs uppercase tracking-[0.35em] text-white/60">UmmahWay</div>
-                    <div className="text-lg font-black">Get the app</div>
-                    <div className="text-white/60">Scan on Android</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-5 min-h-0 overflow-hidden">
-                <div className="xl:col-span-7 min-h-0 overflow-hidden">
-                  <div className="text-xs uppercase tracking-[0.35em] text-white/60">Jumu’ah Timings</div>
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {activeJumuah.map((j) => (
-                      <div key={j.id} className="rounded-3xl border border-white/10 bg-white/5 p-5 overflow-hidden">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xl font-black truncate">Slot {j.slot}</div>
-                          {j.language && (
-                            <div className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-black text-emerald-200 shrink-0">
-                              {j.language}
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 gap-3">
-                          <div className="rounded-2xl bg-white/5 p-3">
-                            <div className="text-xs text-white/60">Khutbah</div>
-                            <div className="tick mt-1 text-2xl font-black">
-                              {formatTimeHHMM(j.khutbah_time)}
-                            </div>
-                          </div>
-                          <div className="rounded-2xl bg-white/5 p-3">
-                            <div className="text-xs text-white/60">Jamaat</div>
-                            <div className="tick mt-1 text-2xl font-black">
-                              {formatTimeHHMM(j.jamaat_time)}
-                            </div>
-                          </div>
-                        </div>
-                        {j.notes && <div className="mt-2 text-sm text-white/70 line-clamp-2">{j.notes}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="xl:col-span-5 min-h-0 overflow-hidden">
-                  <div className="text-xs uppercase tracking-[0.35em] text-white/60">Friday Checklist</div>
-                  <div className="mt-4 rounded-3xl border border-emerald-300/20 bg-emerald-300/10 p-6 overflow-hidden">
-                    <div className="text-xl font-black">Make Friday feel special</div>
-                    <div className="mt-3 text-base text-white/75 leading-6 line-clamp-6">
-                      • Ghusl & best clothes<br />
-                      • Early to the masjid<br />
-                      • Abundant salawat<br />
-                      • Surah Al-Kahf (if you follow that opinion)<br />
-                      • Dua in the last hour
-                    </div>
-                    {hadith && (
-                      <div className="mt-4 rounded-2xl bg-white/10 p-4 overflow-hidden">
-                        <div className="text-xs uppercase tracking-[0.35em] text-white/60">Today’s Hadith</div>
-                        <div className="mt-2 text-base text-white/80 leading-6 line-clamp-4">
-                          <span className="text-emerald-300 font-black">“</span>
-                          {hadith.text}
-                          <span className="text-emerald-300 font-black">”</span>
-                        </div>
-                        <div className="mt-2 text-xs text-white/55 truncate">
-                          {hadith.collection} • #{hadith.hadithnumber}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {slide === "announcements" && (
-            <div className="glass w-full h-full rounded-3xl p-6 md:p-8 overflow-hidden">
-              <div className="flex items-end justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-xs uppercase tracking-[0.35em] text-white/60">Important</div>
-                  <div className="mt-2 text-3xl md:text-4xl font-black truncate">Announcements</div>
-                </div>
-                <div className="hidden md:block rounded-3xl bg-white p-3 shrink-0">
-                  <QRCode value={PLAY_STORE_URL} size={84} />
-                </div>
-              </div>
-
-              <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-5 min-h-0 overflow-hidden">
-                {announcements.slice(0, maxAnnFull).map((a) => (
-                  <div
-                    key={a.id}
-                    className={[
-                      "rounded-3xl border p-6 overflow-hidden",
-                      a.is_pinned
-                        ? "border-amber-300/30 bg-amber-200/10"
-                        : "border-white/10 bg-white/5",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-2xl font-black leading-tight line-clamp-1">{a.title}</div>
-                      {a.is_pinned && (
-                        <div className="rounded-full bg-amber-300/20 px-3 py-1 text-xs font-black text-amber-200 shrink-0">
-                          PINNED
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-3 text-base md:text-lg leading-6 md:leading-7 text-white/75 line-clamp-4">
-                      {a.body}
-                    </div>
-                  </div>
-                ))}
-
-                {announcements.length === 0 && (
-                  <div className="col-span-2 rounded-3xl border border-white/10 bg-white/5 p-8 text-xl text-white/60">
-                    No announcements right now.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Bottom ticker (never grows) */}
-        <div className="shrink-0 mt-3 glass rounded-3xl px-6 py-4 overflow-hidden">
-          <div className="flex items-center gap-4">
-            <div className="rounded-full bg-emerald-400 px-4 py-2 text-sm font-black text-emerald-950 shrink-0">
-              LIVE
-            </div>
-
-            <div className="marquee flex-1 text-lg text-white/80 overflow-hidden">
-              <div className="truncate">
-                {announcements.length
-                  ? announcements.map((a) => `• ${a.title}`).join("   ")
-                  : "• Welcome • Prayer times update automatically • Scan QR to install UmmahWay •"}
-              </div>
-            </div>
-
-            <div className="hidden sm:block rounded-2xl bg-white p-2 shrink-0">
-              <QRCode value={PLAY_STORE_URL} size={50} />
-            </div>
-          </div>
-        </div>
+      {/* Slide content */}
+      <div className={`transition-opacity duration-300 ${isTransitioning ? "opacity-0" : "opacity-100"}`}>
+        {renderSlide()}
       </div>
     </div>
   );
