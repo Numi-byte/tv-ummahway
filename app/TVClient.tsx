@@ -170,6 +170,32 @@ const formatCountdown = (mins: number) => {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 };
 
+const CACHE_VERSION = 1;
+const selectorCacheKey = `ummahway:selector:${CACHE_VERSION}`;
+const displayCacheKey = (masjidId: string) =>
+  `ummahway:display:${masjidId}:${CACHE_VERSION}`;
+
+function readCache<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
 /* =========================================================
    Fullscreen Helpers (cross-browser)
    ========================================================= */
@@ -667,8 +693,12 @@ type SelectableMasjid = {
 
 const MasjidSelector: React.FC = () => {
   const router = useRouter();
-  const [masjids, setMasjids] = useState<SelectableMasjid[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [masjids, setMasjids] = useState<SelectableMasjid[]>(() =>
+    readCache<SelectableMasjid[]>(selectorCacheKey) ?? []
+  );
+  const [loading, setLoading] = useState(() =>
+    (readCache<SelectableMasjid[]>(selectorCacheKey) ?? []).length === 0
+  );
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -680,10 +710,12 @@ const MasjidSelector: React.FC = () => {
         .eq("is_active", true)
         .order("city")
         .order("official_name");
-      setMasjids((data ?? []) as SelectableMasjid[]);
+      const next = (data ?? []) as SelectableMasjid[];
+      setMasjids(next);
+      writeCache(selectorCacheKey, next);
       setLoading(false);
     };
-    load();
+    load().catch(() => setLoading(false));
   }, []);
 
   // Get unique cities
@@ -959,6 +991,26 @@ function TVDisplay({
   const [hadith, setHadith] = useState<HadithOut | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const cached = readCache<{
+      masjid: Masjid | null;
+      prayers: PrayerRow[];
+      announcements: AnnouncementRow[];
+      jumuahSlots: JumuahRow[];
+      weather: WeatherOut | null;
+      hadith: HadithOut | null;
+    }>(displayCacheKey(masjidId));
+
+    if (!cached) return;
+
+    if (cached.masjid) setMasjid(cached.masjid);
+    if (cached.prayers?.length) setPrayers(cached.prayers);
+    if (cached.announcements?.length) setAnnouncements(cached.announcements);
+    if (cached.jumuahSlots?.length) setJumuahSlots(cached.jumuahSlots);
+    if (cached.weather) setWeather(cached.weather);
+    if (cached.hadith) setHadith(cached.hadith);
+  }, [masjidId]);
+
   const [clock, setClock] = useState(() => nowInTz("Europe/Rome"));
   const tz = tzOverride || masjid?.timezone || "Europe/Rome";
   const todayKey = useMemo(() => ymd(clock), [clock]);
@@ -1144,6 +1196,19 @@ function TVDisplay({
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => alive.current && d && setHadith(d))
         .catch(() => {});
+
+      writeCache(displayCacheKey(mId), {
+        masjid: mMasjid,
+        prayers: (p ?? []) as PrayerRow[],
+        announcements: (a ?? []) as AnnouncementRow[],
+        jumuahSlots: ((j ?? []).filter(
+          (r: JumuahRow) =>
+            (!r.valid_from || r.valid_from <= today) &&
+            (!r.valid_to || r.valid_to >= today)
+        ) ?? []) as JumuahRow[],
+        weather,
+        hadith,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
@@ -1156,6 +1221,18 @@ function TVDisplay({
       alive.current = false;
     };
   }, [masjidId, todayKey]);
+
+  useEffect(() => {
+    if (!masjid) return;
+    writeCache(displayCacheKey(masjid.id), {
+      masjid,
+      prayers,
+      announcements,
+      jumuahSlots,
+      weather,
+      hadith,
+    });
+  }, [masjid, prayers, announcements, jumuahSlots, weather, hadith]);
 
   // Build slides array
   const slides = useMemo(() => {
