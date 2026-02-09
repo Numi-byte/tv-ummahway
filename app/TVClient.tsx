@@ -246,7 +246,7 @@ const SlideWrapper: React.FC<{
   children: React.ReactNode;
   gradient?: string;
 }> = ({ children, gradient }) => (
-  <div className="absolute inset-0 flex flex-col items-center justify-center p-12 overflow-hidden">
+  <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-10 lg:p-12 overflow-hidden">
     {gradient && <div className={`absolute inset-0 ${gradient} opacity-30`} />}
     <div className="relative z-10 w-full max-w-6xl">{children}</div>
   </div>
@@ -528,7 +528,7 @@ const AnnouncementSlide: React.FC<{ announcement: AnnouncementRow }> = ({
         : "bg-gradient-to-br from-cyan-900/20 via-transparent to-transparent"
     }
   >
-    <div className="text-center max-w-4xl mx-auto">
+    <div className="text-center max-w-5xl mx-auto px-2 sm:px-4">
       {announcement.is_pinned && (
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/20 border border-amber-500/30 mb-8">
           <span className="text-xl">📌</span>
@@ -542,15 +542,17 @@ const AnnouncementSlide: React.FC<{ announcement: AnnouncementRow }> = ({
         Announcement
       </div>
 
-      <h2 className="text-[clamp(2.5rem,5vw,4rem)] font-black text-white leading-tight">
+      <h2 className="text-[clamp(2rem,4.5vw,4rem)] font-black text-white leading-tight break-words">
         {announcement.title}
       </h2>
 
-      <div className="mt-8 text-[clamp(1.25rem,2.5vw,1.75rem)] text-white/70 leading-relaxed">
-        {announcement.body}
+      <div className="mt-6 sm:mt-8 max-h-[42vh] md:max-h-[46vh] overflow-y-auto px-2 sm:px-4">
+        <p className="text-[clamp(1.05rem,2.2vw,1.75rem)] text-white/70 leading-relaxed whitespace-pre-line break-words">
+          {announcement.body}
+        </p>
       </div>
 
-      <div className="mt-12 inline-block px-6 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 uppercase tracking-wider text-sm">
+      <div className="mt-8 sm:mt-12 inline-block px-6 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 uppercase tracking-wider text-sm">
         {announcement.category}
       </div>
     </div>
@@ -604,19 +606,21 @@ const WeatherSlide: React.FC<{ weather: WeatherOut }> = ({ weather }) => (
 // 8. Hadith Slide
 const HadithSlide: React.FC<{ hadith: HadithOut }> = ({ hadith }) => (
   <SlideWrapper gradient="bg-gradient-to-br from-violet-900/20 via-transparent to-emerald-900/10">
-    <div className="text-center max-w-4xl mx-auto">
-      <div className="text-6xl mb-8">📖</div>
+    <div className="text-center max-w-5xl mx-auto px-2 sm:px-4">
+      <div className="text-5xl sm:text-6xl mb-6 sm:mb-8">📖</div>
       <div className="text-sm uppercase tracking-[0.4em] text-violet-400 mb-6">
         Daily Hadith
       </div>
 
-      <blockquote className="text-[clamp(1.5rem,3vw,2.25rem)] text-white/90 leading-relaxed">
-        <span className="text-emerald-400 text-4xl font-serif">&ldquo;</span>
-        {hadith.text}
-        <span className="text-emerald-400 text-4xl font-serif">&rdquo;</span>
-      </blockquote>
+      <div className="max-h-[44vh] md:max-h-[48vh] overflow-y-auto px-2 sm:px-4">
+        <blockquote className="text-[clamp(1.15rem,2.8vw,2.25rem)] text-white/90 leading-relaxed break-words">
+          <span className="text-emerald-400 text-3xl sm:text-4xl font-serif">&ldquo;</span>
+          {hadith.text}
+          <span className="text-emerald-400 text-3xl sm:text-4xl font-serif">&rdquo;</span>
+        </blockquote>
+      </div>
 
-      <div className="mt-12 flex items-center justify-center gap-4 text-white/50">
+      <div className="mt-8 sm:mt-12 flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-white/50">
         <span className="text-lg">{hadith.collection}</span>
         <span className="text-white/20">•</span>
         <span className="text-lg">#{hadith.hadithnumber}</span>
@@ -704,6 +708,10 @@ const MasjidSelector: React.FC = () => {
 
   useEffect(() => {
     const load = async () => {
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
       const { data } = await supabase
         .from("public_masjids")
         .select("id, official_name, short_name, city, region, is_active")
@@ -1131,6 +1139,12 @@ function TVDisplay({
   // Load data
   const loadData = async (mId: string) => {
     try {
+      if (!supabase) {
+        throw new Error(
+          "Missing Supabase configuration. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        );
+      }
+
       const { data: m } = await supabase
         .from("public_masjids")
         .select("*")
