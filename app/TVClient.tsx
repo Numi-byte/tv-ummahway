@@ -136,6 +136,27 @@ function getDeviceTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
 }
 
+function resolveActiveTimezone({
+  tzOverride,
+  deviceTz,
+  masjidTz,
+}: {
+  tzOverride: string | null;
+  deviceTz: string | null;
+  masjidTz: string | null;
+}) {
+  const normalizedOverride = tzOverride?.trim().toLowerCase() ?? null;
+  if (
+    normalizedOverride &&
+    ["local", "device", "device-local", "device_local"].includes(
+      normalizedOverride
+    )
+  ) {
+    return deviceTz || masjidTz || "Europe/Rome";
+  }
+  return tzOverride || deviceTz || masjidTz || "Europe/Rome";
+}
+
 const ymd = (c: ReturnType<typeof nowInTz>) =>
   `${c.year}-${two(c.month)}-${two(c.day)}`;
 
@@ -1026,11 +1047,11 @@ function TVDisplay({
 
   const [clock, setClock] = useState(() => nowInTz("Europe/Rome"));
   const deviceTz = useMemo(() => getDeviceTimezone(), []);
-  const effectiveOverride =
-    tzOverride && ["local", "device"].includes(tzOverride.toLowerCase())
-      ? null
-      : tzOverride;
-  const tz = effectiveOverride || deviceTz || masjid?.timezone || "Europe/Rome";
+  const tz = resolveActiveTimezone({
+    tzOverride,
+    deviceTz,
+    masjidTz: masjid?.timezone ?? null,
+  });
   const todayKey = useMemo(() => ymd(clock), [clock]);
   const isFriday = clock.weekday === "Friday";
 
@@ -1167,7 +1188,11 @@ function TVDisplay({
       const mMasjid = m as Masjid;
       setMasjid(mMasjid);
 
-      const tzForMasjid = tzOverride || mMasjid.timezone || "Europe/Rome";
+      const tzForMasjid = resolveActiveTimezone({
+        tzOverride,
+        deviceTz,
+        masjidTz: mMasjid.timezone,
+      });
       const today = ymd(nowInTz(tzForMasjid));
 
       const { data: p } = await supabase
