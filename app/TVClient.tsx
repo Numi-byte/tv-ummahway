@@ -657,38 +657,106 @@ const WeatherSlide: React.FC<{ weather: WeatherOut }> = ({ weather }) => (
 );
 
 // 8. Hadith Slide
-const HadithSlide: React.FC<{ hadith: HadithOut }> = ({ hadith }) => (
-  <SlideWrapper gradient="bg-gradient-to-br from-violet-900/20 via-transparent to-emerald-900/10">
-    <div className="text-center max-w-5xl mx-auto px-2 sm:px-4">
-      <div className="text-5xl sm:text-6xl mb-6 sm:mb-8">📖</div>
-      <div className="text-sm uppercase tracking-[0.4em] text-violet-400 mb-6">
-        Daily Hadith
-      </div>
+const HadithSlide: React.FC<{ hadith: HadithOut }> = ({ hadith }) => {
+  const textScrollerRef = useRef<HTMLDivElement | null>(null);
 
-      <div className="max-h-[44vh] md:max-h-[48vh] overflow-y-auto px-2 sm:px-4">
-        <blockquote className="text-[clamp(1.15rem,2.8vw,2.25rem)] text-white/90 leading-relaxed break-words">
-          <span className="text-emerald-400 text-3xl sm:text-4xl font-serif">&ldquo;</span>
-          {hadith.text}
-          <span className="text-emerald-400 text-3xl sm:text-4xl font-serif">&rdquo;</span>
-        </blockquote>
-      </div>
+  useEffect(() => {
+    const el = textScrollerRef.current;
+    if (!el) return;
 
-      <div className="mt-8 sm:mt-12 flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-white/50">
-        <span className="text-lg">{hadith.collection}</span>
-        <span className="text-white/20">•</span>
-        <span className="text-lg">#{hadith.hadithnumber}</span>
-        {hadith.grade && (
-          <>
-            <span className="text-white/20">•</span>
-            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-sm">
-              {hadith.grade}
-            </span>
-          </>
-        )}
+    let frame = 0;
+    let pauseUntil = 0;
+    let direction: 1 | -1 = 1;
+    let lastTs = 0;
+
+    const step = (ts: number) => {
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScroll <= 12) {
+        el.scrollTop = 0;
+        return;
+      }
+
+      if (!lastTs) lastTs = ts;
+      const dt = ts - lastTs;
+      lastTs = ts;
+
+      if (ts >= pauseUntil) {
+        const next = el.scrollTop + direction * (dt * 0.02);
+        el.scrollTop = Math.min(maxScroll, Math.max(0, next));
+
+        const reachedBottom = direction === 1 && el.scrollTop >= maxScroll - 2;
+        const reachedTop = direction === -1 && el.scrollTop <= 2;
+
+        if (reachedBottom || reachedTop) {
+          direction = direction === 1 ? -1 : 1;
+          pauseUntil = ts + 1500;
+        }
+      }
+
+      frame = window.requestAnimationFrame(step);
+    };
+
+    frame = window.requestAnimationFrame(step);
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [hadith.text]);
+
+  return (
+    <SlideWrapper gradient="bg-gradient-to-br from-emerald-950 via-slate-950 to-amber-950/60">
+      <div className="text-center max-w-6xl mx-auto w-full px-2 sm:px-4">
+        <div className="inline-flex items-center gap-3 px-6 py-2 rounded-full border border-amber-300/25 bg-amber-300/5 mb-6">
+          <span className="text-amber-300 text-sm tracking-[0.38em] uppercase">
+            حديث اليوم
+          </span>
+          <span className="text-amber-200/80">•</span>
+          <span className="text-emerald-200/90 text-sm tracking-[0.32em] uppercase">
+            Daily Hadith
+          </span>
+        </div>
+
+        <div className="relative rounded-[2.25rem] border border-amber-200/20 bg-gradient-to-b from-amber-300/10 via-transparent to-emerald-300/10 p-4 sm:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.45)] overflow-hidden">
+          <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_top,_#fcd34d_0%,_transparent_35%),radial-gradient(circle_at_bottom,_#34d399_0%,_transparent_30%)]" />
+
+          <div className="relative mx-auto max-w-5xl">
+            <div className="text-3xl sm:text-5xl mb-4 text-amber-200">ﷺ</div>
+
+            <div
+              ref={textScrollerRef}
+              className="max-h-[40vh] md:max-h-[46vh] overflow-y-auto px-2 sm:px-4 [scrollbar-width:thin] [scrollbar-color:rgba(245,158,11,0.65)_transparent]"
+            >
+              <blockquote className="text-[clamp(1.15rem,2.6vw,2.2rem)] text-white/95 leading-relaxed break-words">
+                <span className="text-amber-300 text-3xl sm:text-4xl font-serif">
+                  &ldquo;
+                </span>{" "}
+                {hadith.text}{" "}
+                <span className="text-amber-300 text-3xl sm:text-4xl font-serif">
+                  &rdquo;
+                </span>
+              </blockquote>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-7 sm:mt-10 flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-white/60">
+          <span className="text-lg uppercase tracking-[0.2em] text-amber-200/85">
+            {hadith.collection}
+          </span>
+          <span className="text-white/25">•</span>
+          <span className="text-lg text-emerald-100/90">#{hadith.hadithnumber}</span>
+          {hadith.grade && (
+            <>
+              <span className="text-white/25">•</span>
+              <span className="px-3 py-1 rounded-full border border-emerald-300/35 bg-emerald-400/10 text-emerald-200 text-sm uppercase tracking-[0.12em]">
+                {hadith.grade}
+              </span>
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  </SlideWrapper>
-);
+    </SlideWrapper>
+  );
+};
 
 // 9. QR/Download Slide (Play + Apple)
 const QRSlide: React.FC<{ masjid: Masjid }> = ({ masjid }) => (
