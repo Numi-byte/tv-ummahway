@@ -131,6 +131,11 @@ function nowInTz(tz: string | null) {
   };
 }
 
+function getDeviceTimezone() {
+  if (typeof Intl === "undefined") return null;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+}
+
 const ymd = (c: ReturnType<typeof nowInTz>) =>
   `${c.year}-${two(c.month)}-${two(c.day)}`;
 
@@ -1020,7 +1025,12 @@ function TVDisplay({
   }, [masjidId]);
 
   const [clock, setClock] = useState(() => nowInTz("Europe/Rome"));
-  const tz = tzOverride || masjid?.timezone || "Europe/Rome";
+  const deviceTz = useMemo(() => getDeviceTimezone(), []);
+  const effectiveOverride =
+    tzOverride && ["local", "device"].includes(tzOverride.toLowerCase())
+      ? null
+      : tzOverride;
+  const tz = effectiveOverride || deviceTz || masjid?.timezone || "Europe/Rome";
   const todayKey = useMemo(() => ymd(clock), [clock]);
   const isFriday = clock.weekday === "Friday";
 
