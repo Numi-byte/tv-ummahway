@@ -87,6 +87,13 @@ const PRAYER_LABELS: Record<PrayerKey, string> = {
   maghrib: "Maghrib",
   isha: "Isha",
 };
+const PRAYER_LABELS_AR: Record<PrayerKey, string> = {
+  fajr: "الفجر",
+  dhuhr: "الظهر",
+  asr: "العصر",
+  maghrib: "المغرب",
+  isha: "العشاء",
+};
 const PRAYER_ICONS: Record<PrayerKey, string> = {
   fajr: "🌅",
   dhuhr: "☀️",
@@ -271,10 +278,13 @@ async function exitFullscreen() {
 const SlideWrapper: React.FC<{
   children: React.ReactNode;
   gradient?: string;
-}> = ({ children, gradient }) => (
+  fullWidth?: boolean;
+}> = ({ children, gradient, fullWidth = false }) => (
   <div className="absolute inset-0 flex flex-col items-center justify-center p-6 sm:p-10 lg:p-12 overflow-hidden">
     {gradient && <div className={`absolute inset-0 ${gradient} opacity-30`} />}
-    <div className="relative z-10 w-full max-w-6xl">{children}</div>
+    <div className={`relative z-10 w-full ${fullWidth ? "h-full" : "max-w-6xl"}`}>
+      {children}
+    </div>
   </div>
 );
 
@@ -363,71 +373,88 @@ const PrayersSlide: React.FC<{
   next: ReturnType<typeof getNextPrayer>;
   tz: string;
 }> = ({ prayers, next }) => (
-  <SlideWrapper gradient="bg-gradient-to-b from-slate-900/50 to-transparent">
-    <div className="text-center mb-12">
-      <div className="text-sm uppercase tracking-[0.4em] text-emerald-400 mb-4">
-        Todays Schedule
+  <SlideWrapper
+    fullWidth
+    gradient="bg-[radial-gradient(circle_at_top,rgba(180,140,70,0.35),transparent_50%),linear-gradient(180deg,rgba(4,47,46,0.85)_0%,rgba(2,6,23,0.95)_70%)]"
+  >
+    <div className="relative h-full rounded-[2.5rem] border border-amber-500/20 bg-slate-950/50 px-10 py-12 shadow-[0_0_80px_rgba(245,158,11,0.08)] overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 islamic-pattern opacity-25" />
+
+      <div className="relative text-center mb-12">
+        <div className="text-sm uppercase tracking-[0.45em] text-amber-300/90 mb-3">
+          Today&apos;s Schedule
+        </div>
+        <div className="text-2xl text-amber-200/80 mb-4">مواقيت الصلاة</div>
+        <h2 className="text-6xl font-black text-white">Daily Prayers</h2>
       </div>
-      <h2 className="text-5xl font-black text-white">Prayer Times</h2>
-    </div>
 
-    <div className="grid grid-cols-5 gap-6">
-      {PRAYER_ORDER.map((key) => {
-        const row = prayers.find((p) => p.prayer === key);
-        const isNext = next?.key === key;
+      <div className="relative grid grid-cols-5 gap-6 h-[calc(100%-10rem)]">
+        {PRAYER_ORDER.map((key) => {
+          const row = prayers.find((p) => p.prayer === key);
+          const isNext = next?.key === key;
 
-        return (
-          <div
-            key={key}
-            className={`relative rounded-3xl p-8 text-center transition-all ${
-              isNext
-                ? "bg-emerald-500 text-emerald-950 scale-105 shadow-2xl shadow-emerald-500/30"
-                : "bg-white/5 text-white border border-white/10"
-            }`}
-          >
-            {isNext && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-white text-emerald-950 text-xs font-bold uppercase tracking-wider">
-                Next
+          return (
+            <div
+              key={key}
+              className={`relative rounded-t-[5rem] rounded-b-3xl p-8 text-center transition-all flex flex-col justify-between border ${
+                isNext
+                  ? "bg-gradient-to-b from-amber-300 to-emerald-400 text-emerald-950 scale-[1.03] shadow-2xl shadow-amber-500/30 border-amber-100/70"
+                  : "bg-slate-900/70 text-white border-amber-500/20"
+              }`}
+            >
+              {isNext && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-white text-emerald-950 text-xs font-bold uppercase tracking-wider">
+                  Next
+                </div>
+              )}
+
+              <div>
+                <div className="text-4xl mb-4">{PRAYER_ICONS[key]}</div>
+                <div
+                  className={`text-2xl font-bold ${isNext ? "" : "text-white"}`}
+                >
+                  {PRAYER_LABELS[key]}
+                </div>
+                <div
+                  className={`text-xl mt-1 ${
+                    isNext ? "text-emerald-950/80" : "text-amber-200/75"
+                  }`}
+                >
+                  {PRAYER_LABELS_AR[key]}
+                </div>
               </div>
-            )}
 
-            <div className="text-4xl mb-4">{PRAYER_ICONS[key]}</div>
-            <div
-              className={`text-2xl font-bold mb-6 ${
-                isNext ? "" : "text-white/90"
-              }`}
-            >
-              {PRAYER_LABELS[key]}
-            </div>
+              <div>
+                <div
+                  className={`text-sm uppercase tracking-wider mb-2 ${
+                    isNext ? "text-emerald-950/60" : "text-white/50"
+                  }`}
+                >
+                  Adhan
+                </div>
+                <div
+                  className={`text-4xl font-bold tabular-nums mb-6 ${
+                    isNext ? "" : "text-white/80"
+                  }`}
+                >
+                  {formatTime(row?.start_time)}
+                </div>
 
-            <div
-              className={`text-sm uppercase tracking-wider mb-2 ${
-                isNext ? "text-emerald-950/60" : "text-white/40"
-              }`}
-            >
-              Adhan
+                <div
+                  className={`text-sm uppercase tracking-wider mb-2 ${
+                    isNext ? "text-emerald-950/60" : "text-white/50"
+                  }`}
+                >
+                  Iqama
+                </div>
+                <div className="text-5xl font-black tabular-nums">
+                  {formatTime(row?.jamaat_time)}
+                </div>
+              </div>
             </div>
-            <div
-              className={`text-3xl font-bold tabular-nums mb-6 ${
-                isNext ? "" : "text-white/70"
-              }`}
-            >
-              {formatTime(row?.start_time)}
-            </div>
-
-            <div
-              className={`text-sm uppercase tracking-wider mb-2 ${
-                isNext ? "text-emerald-950/60" : "text-white/40"
-              }`}
-            >
-              Iqama
-            </div>
-            <div className="text-4xl font-black tabular-nums">
-              {formatTime(row?.jamaat_time)}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   </SlideWrapper>
 );
@@ -1059,6 +1086,11 @@ function TVDisplay({
   const [progress, setProgress] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
+  const getSlideDurationSec = (slideType: SlideType | undefined) => {
+    if (slideType === "prayers") return cycleSec * 2;
+    return cycleSec;
+  };
+
   // Fullscreen + gate
   const [isFs, setIsFs] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
@@ -1296,34 +1328,38 @@ function TVDisplay({
     return arr;
   }, [prayers, tz, isFriday, jumuahSlots, announcements, weather, hadith]);
 
+  useEffect(() => {
+    setCurrentSlide((prev) => (prev >= slides.length ? 0 : prev));
+  }, [slides.length]);
+
+  const activeSlideType = slides[currentSlide];
+  const activeSlideDurationSec = getSlideDurationSec(activeSlideType);
+
   // Slide rotation
   useEffect(() => {
     if (slides.length === 0) return;
 
-    let startTime = Date.now();
-    setCurrentSlide(0);
+    const startTime = Date.now();
     setProgress(0);
 
     const progressInterval = setInterval(() => {
       const elapsed = (Date.now() - startTime) / 1000;
-      setProgress(Math.min(1, elapsed / cycleSec));
+      setProgress(Math.min(1, elapsed / activeSlideDurationSec));
     }, 50);
 
-    const slideInterval = setInterval(() => {
+    const slideTimeout = setTimeout(() => {
       setIsTransitioning(true);
       setTimeout(() => {
         setCurrentSlide((prev) => (prev + 1) % slides.length);
         setIsTransitioning(false);
-        startTime = Date.now();
-        setProgress(0);
       }, 300);
-    }, cycleSec * 1000);
+    }, activeSlideDurationSec * 1000);
 
     return () => {
       clearInterval(progressInterval);
-      clearInterval(slideInterval);
+      clearTimeout(slideTimeout);
     };
-  }, [slides.length, cycleSec]);
+  }, [slides, activeSlideDurationSec, currentSlide]);
 
   const next = useMemo(
     () => getNextPrayer(prayers, tz),
