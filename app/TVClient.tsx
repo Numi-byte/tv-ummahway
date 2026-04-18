@@ -1166,6 +1166,37 @@ function TVDisplay({
   // Controls auto-hide (only after fullscreen is active)
   const [showControls, setShowControls] = useState(true);
   const hideTimer = useRef<number | null>(null);
+  const [viewport, setViewport] = useState({ width: 1920, height: 1080 });
+
+  useEffect(() => {
+    const updateViewport = () =>
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
+
+  const safePadding = useMemo(() => {
+    const smallerSide = Math.min(viewport.width, viewport.height);
+    return Math.max(12, Math.round(smallerSide * 0.02));
+  }, [viewport.height, viewport.width]);
+
+  const stageMetrics = useMemo(() => {
+    const BASE_WIDTH = 1920;
+    const BASE_HEIGHT = 1080;
+
+    const availableWidth = Math.max(360, viewport.width - safePadding * 2);
+    const availableHeight = Math.max(240, viewport.height - safePadding * 2);
+    const scale = Math.min(availableWidth / BASE_WIDTH, availableHeight / BASE_HEIGHT);
+
+    return {
+      baseWidth: BASE_WIDTH,
+      baseHeight: BASE_HEIGHT,
+      width: BASE_WIDTH * scale,
+      height: BASE_HEIGHT * scale,
+      scale,
+    };
+  }, [safePadding, viewport.height, viewport.width]);
 
   const armHideControls = () => {
     if (!isFs) return;
@@ -1513,184 +1544,203 @@ function TVDisplay({
     >
       <div className="noise" />
 
-      {/* Progress bar */}
       <div
-        className={`absolute top-0 left-0 right-0 h-1 bg-white/5 z-50 transition-opacity ${
-          showControls ? "opacity-100" : "opacity-0"
-        }`}
+        className="absolute inset-0 flex items-center justify-center"
+        style={{ padding: safePadding }}
       >
         <div
-          className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-100"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-
-      {/* Slide dots */}
-      <div
-        className={`absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 transition-opacity ${
-          showControls ? "opacity-100" : "opacity-0"
-        }`}
-      >
-        {slides.map((_, i) => (
+          className="relative overflow-hidden rounded-[28px] border border-white/10 bg-black/10 shadow-[0_30px_100px_rgba(2,6,23,0.7)]"
+          style={{ width: stageMetrics.width, height: stageMetrics.height }}
+        >
           <div
-            key={i}
-            className={`w-2 h-2 rounded-full transition-all ${
-              i === currentSlide ? "bg-emerald-400 w-8" : "bg-white/20"
-            }`}
-          />
-        ))}
-      </div>
-
-      {/* Branding (Play + Apple mini QR) */}
-      <div
-        className={`absolute bottom-8 right-8 flex items-center gap-4 z-50 transition-opacity ${
-          showControls ? "opacity-100" : "opacity-0"
-        }`}
-      >
-        <div className="text-right">
-          <div className="text-xs uppercase tracking-[0.3em] text-white/40">
-            Powered by
-          </div>
-          <div className="text-lg font-bold text-white/70">UmmahWay</div>
-          <div className="text-[10px] uppercase tracking-[0.3em] text-white/30 mt-1">
-            Android • iPhone
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="rounded-xl bg-white p-2">
-            <QRCode value={PLAY_STORE_URL} size={44} />
-          </div>
-          <div className="rounded-xl bg-white p-2">
-            <QRCode value={APPLE_STORE_URL} size={44} />
-          </div>
-        </div>
-      </div>
-
-      {/* Current time badge */}
-      <div
-        className={`absolute top-8 right-8 z-50 transition-opacity ${
-          showControls ? "opacity-100" : "opacity-0"
-        }`}
-      >
-        <div className="glass rounded-2xl px-6 py-3 flex items-center gap-4">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <div className="text-2xl font-bold tabular-nums">
-            {two(clock.hour)}:{two(clock.minute)}
-            <span className="text-white/30">:{two(clock.second)}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Back to selector button (only after fullscreen) */}
-      <button
-        onClick={() => router.push("/")}
-        className={`absolute top-8 left-8 z-50 glass rounded-2xl px-5 py-3 flex items-center gap-3 text-white/60 hover:text-white hover:bg-white/10 transition-all
-          ${showControls ? "opacity-100" : "opacity-0"}
-        `}
-      >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 19l-7-7 7-7"
-          />
-        </svg>
-        <span className="font-medium">Change Masjid</span>
-      </button>
-
-      {/* Minimize (Exit Fullscreen) button */}
-      <button
-        onClick={leaveFullscreen}
-        className={`absolute top-8 left-[190px] z-50 glass rounded-2xl px-5 py-3 flex items-center gap-3 text-white/60 hover:text-white hover:bg-white/10 transition-all
-          ${showControls ? "opacity-100" : "opacity-0"}
-        `}
-        aria-label="Exit fullscreen"
-      >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 9h6v6H9z"
-          />
-        </svg>
-        <span className="font-medium">Minimize</span>
-      </button>
-
-      {/* Slide content */}
-      <div
-        className={`transition-opacity duration-300 ${
-          isTransitioning ? "opacity-0" : "opacity-100"
-        }`}
-      >
-        {renderSlide()}
-      </div>
-
-      {/* FULLSCREEN GATE OVERLAY (ONLY CLICKABLE THING when not fullscreen) */}
-      {gateActive && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center">
-          {/* Dim */}
-          <div className="absolute inset-0 bg-black/70" />
-
-          {/* The ONLY clickable area */}
-          <button
-            onClick={enterFullscreen}
-            className="relative z-10 w-full h-full flex items-center justify-center outline-none"
-            aria-label="Enter fullscreen"
+            className="absolute inset-0 origin-top-left"
+            style={{
+              width: stageMetrics.baseWidth,
+              height: stageMetrics.baseHeight,
+              transform: `scale(${stageMetrics.scale})`,
+            }}
           >
-            <div className="glass rounded-[32px] px-10 py-10 text-center max-w-2xl mx-8 border border-white/10">
-              <div className="text-7xl mb-6">📺</div>
-              <h1 className="text-4xl font-black text-white">
-                Tap to Start Fullscreen
-              </h1>
-              <p className="mt-4 text-white/60 text-lg leading-relaxed">
-                This TV display runs in fullscreen for the best experience.
-                <br />
-                Press <span className="text-white/80 font-semibold">Enter</span>{" "}
-                on a remote keyboard, or click once.
-              </p>
+            {/* Progress bar */}
+            <div
+              className={`absolute top-0 left-0 right-0 h-1 bg-white/5 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-100"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
 
-              {fsError && (
-                <div className="mt-6 text-amber-300 text-sm">
-                  {fsError}
+            {/* Slide dots */}
+            <div
+              className={`absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              {slides.map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    i === currentSlide ? "bg-emerald-400 w-8" : "bg-white/20"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* Branding (Play + Apple mini QR) */}
+            <div
+              className={`absolute bottom-8 right-8 flex items-center gap-4 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <div className="text-right">
+                <div className="text-xs uppercase tracking-[0.3em] text-white/40">
+                  Powered by
                 </div>
-              )}
-
-              <div className="mt-10 inline-flex items-center gap-3 px-7 py-4 rounded-2xl bg-emerald-500 text-emerald-950 font-black text-lg">
-                Enter Fullscreen
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"
-                  />
-                </svg>
+                <div className="text-lg font-bold text-white/70">UmmahWay</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-white/30 mt-1">
+                  Android • iPhone
+                </div>
               </div>
-
-              <div className="mt-6 text-xs uppercase tracking-[0.35em] text-white/30">
-                UmmahWay • TV Mode
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-white p-2">
+                  <QRCode value={PLAY_STORE_URL} size={44} />
+                </div>
+                <div className="rounded-xl bg-white p-2">
+                  <QRCode value={APPLE_STORE_URL} size={44} />
+                </div>
               </div>
             </div>
-          </button>
+
+            {/* Current time badge */}
+            <div
+              className={`absolute top-8 right-8 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <div className="glass rounded-2xl px-6 py-3 flex items-center gap-4">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <div className="text-2xl font-bold tabular-nums">
+                  {two(clock.hour)}:{two(clock.minute)}
+                  <span className="text-white/30">:{two(clock.second)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Back to selector button (only after fullscreen) */}
+            <button
+              onClick={() => router.push("/")}
+              className={`absolute top-8 left-8 z-50 glass rounded-2xl px-5 py-3 flex items-center gap-3 text-white/60 hover:text-white hover:bg-white/10 transition-all
+          ${showControls ? "opacity-100" : "opacity-0"}
+        `}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+              <span className="font-medium">Change Masjid</span>
+            </button>
+
+            {/* Minimize (Exit Fullscreen) button */}
+            <button
+              onClick={leaveFullscreen}
+              className={`absolute top-8 left-[190px] z-50 glass rounded-2xl px-5 py-3 flex items-center gap-3 text-white/60 hover:text-white hover:bg-white/10 transition-all
+          ${showControls ? "opacity-100" : "opacity-0"}
+        `}
+              aria-label="Exit fullscreen"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 9h6v6H9z"
+                />
+              </svg>
+              <span className="font-medium">Minimize</span>
+            </button>
+
+            {/* Slide content */}
+            <div
+              className={`transition-opacity duration-300 ${
+                isTransitioning ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              {renderSlide()}
+            </div>
+
+            {/* FULLSCREEN GATE OVERLAY (ONLY CLICKABLE THING when not fullscreen) */}
+            {gateActive && (
+              <div className="absolute inset-0 z-[200] flex items-center justify-center">
+                {/* Dim */}
+                <div className="absolute inset-0 bg-black/70" />
+
+                {/* The ONLY clickable area */}
+                <button
+                  onClick={enterFullscreen}
+                  className="relative z-10 w-full h-full flex items-center justify-center outline-none"
+                  aria-label="Enter fullscreen"
+                >
+                  <div className="glass rounded-[32px] px-10 py-10 text-center max-w-2xl mx-8 border border-white/10">
+                    <div className="text-7xl mb-6">📺</div>
+                    <h1 className="text-4xl font-black text-white">
+                      Tap to Start Fullscreen
+                    </h1>
+                    <p className="mt-4 text-white/60 text-lg leading-relaxed">
+                      This TV display runs in fullscreen for the best experience.
+                      <br />
+                      Press <span className="text-white/80 font-semibold">Enter</span>{" "}
+                      on a remote keyboard, or click once.
+                    </p>
+
+                    {fsError && (
+                      <div className="mt-6 text-amber-300 text-sm">
+                        {fsError}
+                      </div>
+                    )}
+
+                    <div className="mt-10 inline-flex items-center gap-3 px-7 py-4 rounded-2xl bg-emerald-500 text-emerald-950 font-black text-lg">
+                      Enter Fullscreen
+                      <svg
+                        className="w-6 h-6"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"
+                        />
+                      </svg>
+                    </div>
+
+                    <div className="mt-6 text-xs uppercase tracking-[0.35em] text-white/30">
+                      UmmahWay • TV Mode
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
