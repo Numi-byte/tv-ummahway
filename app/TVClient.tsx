@@ -942,38 +942,38 @@ const MasjidSelector: React.FC = () => {
         <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative z-10 h-full flex flex-col p-8 lg:p-12">
+      <div className="relative z-10 h-full flex flex-col p-5 lg:p-8">
         {/* Header */}
-        <div className="text-center mb-8 lg:mb-12">
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 mb-6">
+        <div className="text-center mb-4 lg:mb-5">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 mb-3">
             <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-emerald-300 uppercase tracking-[0.3em] text-sm">
+            <span className="text-emerald-300 uppercase tracking-[0.25em] text-xs lg:text-sm">
               TV Display Setup
             </span>
           </div>
 
-          <h1 className="text-4xl lg:text-6xl font-black mb-4">
+          <h1 className="text-3xl lg:text-5xl font-black mb-2">
             Select Your Masjid
           </h1>
-          <p className="text-xl text-white/50 max-w-2xl mx-auto">
+          <p className="text-base lg:text-lg text-white/50 max-w-2xl mx-auto">
             Choose a masjid to display prayer times, announcements, and more
           </p>
         </div>
 
         {/* Search & Filters */}
-        <div className="flex flex-col lg:flex-row items-center justify-center gap-4 mb-8">
+        <div className="mb-4 lg:mb-5 rounded-2xl border border-white/10 bg-white/5 p-3 lg:p-4">
           {/* Search */}
-          <div className="relative w-full max-w-md">
+          <div className="relative w-full">
             <input
               type="text"
               placeholder="Search masjids..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-lg focus:outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all"
+              className="w-full px-5 py-3 rounded-xl bg-black/20 border border-white/10 text-white placeholder-white/35 text-base lg:text-lg focus:outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all"
             />
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30">
               <svg
-                className="w-6 h-6"
+                className="w-5 h-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -989,10 +989,10 @@ const MasjidSelector: React.FC = () => {
           </div>
 
           {/* City filter */}
-          <div className="flex items-center gap-2 flex-wrap justify-center">
+          <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
               onClick={() => setSelectedCity(null)}
-              className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+              className={`whitespace-nowrap px-4 py-2 rounded-lg text-xs lg:text-sm font-semibold transition-all ${
                 !selectedCity
                   ? "bg-emerald-500 text-emerald-950"
                   : "bg-white/5 text-white/70 hover:bg-white/10 border border-white/10"
@@ -1004,7 +1004,7 @@ const MasjidSelector: React.FC = () => {
               <button
                 key={city}
                 onClick={() => setSelectedCity(city)}
-                className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                className={`whitespace-nowrap px-4 py-2 rounded-lg text-xs lg:text-sm font-semibold transition-all ${
                   selectedCity === city
                     ? "bg-emerald-500 text-emerald-950"
                     : "bg-white/5 text-white/70 hover:bg-white/10 border border-white/10"
@@ -1017,7 +1017,7 @@ const MasjidSelector: React.FC = () => {
         </div>
 
         {/* Masjid Grid */}
-        <div className="flex-1 overflow-auto min-h-0 pb-6 lg:pb-8">
+        <div className="flex-1 overflow-auto min-h-0 pb-3">
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="w-12 h-12 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin" />
@@ -1040,7 +1040,7 @@ const MasjidSelector: React.FC = () => {
             </div>
           ) : (
             <div
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6 pb-14 lg:pb-20"
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4 pb-5"
               onKeyDown={handleGridKeyDown}
             >
               {filteredMasjids.map((masjid, index) => (
@@ -1052,19 +1052,19 @@ const MasjidSelector: React.FC = () => {
                   onClick={() => selectMasjid(masjid.id)}
                   onFocus={() => setActiveMasjidIndex(index)}
                   tabIndex={index === normalizedActiveMasjidIndex ? 0 : -1}
-                  className="group relative rounded-3xl bg-white/5 border border-white/10 p-6 text-left transition-all hover:bg-white/10 hover:border-emerald-500/30 hover:scale-[1.02] hover:shadow-xl hover:shadow-emerald-500/10 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/60 focus-visible:border-emerald-400"
+                  className="group relative rounded-2xl bg-white/5 border border-white/10 p-5 text-left transition-all hover:bg-white/10 hover:border-emerald-500/30 hover:scale-[1.01] hover:shadow-xl hover:shadow-emerald-500/10 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/60 focus-visible:border-emerald-400"
                 >
                   {/* Hover glow */}
-                  <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
                   <div className="relative z-10">
                     {/* Icon */}
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 group-hover:bg-emerald-500/20 transition-colors">
-                      <span className="text-2xl">🕌</span>
+                    <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
+                      <span className="text-xl">🕌</span>
                     </div>
 
                     {/* Name */}
-                    <h3 className="text-xl font-bold text-white mb-1 line-clamp-2">
+                    <h3 className="text-lg font-bold text-white mb-1 line-clamp-2">
                       {masjid.short_name || masjid.official_name}
                     </h3>
 
@@ -1098,7 +1098,7 @@ const MasjidSelector: React.FC = () => {
                     )}
 
                     {/* Arrow */}
-                    <div className="absolute bottom-6 right-6 w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                    <div className="absolute bottom-5 right-5 w-9 h-9 rounded-full bg-emerald-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                       <svg
                         className="w-5 h-5 text-emerald-400"
                         fill="none"
@@ -1121,18 +1121,18 @@ const MasjidSelector: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="mt-auto shrink-0 pt-6 flex items-center justify-between border-t border-white/10">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
-              <span className="text-sm font-bold text-white">UW</span>
+        <div className="mt-3 shrink-0 pt-3 flex items-center justify-between border-t border-white/10 text-xs lg:text-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
+              <span className="text-xs font-bold text-white">UW</span>
             </div>
             <div>
               <div className="font-semibold text-white">UmmahWay TV</div>
-              <div className="text-sm text-white/50">Digital Masjid Display</div>
+              <div className="text-white/50">Digital Masjid Display</div>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 text-sm text-white/40">
+          <div className="flex items-center gap-6 text-white/40">
             <div>
               <span className="text-white/60">{masjids.length}</span> masjids
               available
