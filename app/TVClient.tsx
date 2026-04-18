@@ -826,6 +826,8 @@ const MasjidSelector: React.FC = () => {
   );
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeMasjidIndex, setActiveMasjidIndex] = useState(0);
+  const masjidButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -866,9 +868,68 @@ const MasjidSelector: React.FC = () => {
       return matchesCity && matchesSearch;
     });
   }, [masjids, selectedCity, searchQuery]);
+  const normalizedActiveMasjidIndex =
+    filteredMasjids.length > 0
+      ? Math.min(activeMasjidIndex, filteredMasjids.length - 1)
+      : 0;
 
   const selectMasjid = (id: string) => {
     router.push(`/?masjid=${id}`);
+  };
+
+  const getColumnCount = () => {
+    if (typeof window === "undefined") return 1;
+    if (window.innerWidth >= 1280) return 4;
+    if (window.innerWidth >= 1024) return 3;
+    if (window.innerWidth >= 768) return 2;
+    return 1;
+  };
+
+  useEffect(() => {
+    masjidButtonRefs.current = masjidButtonRefs.current.slice(
+      0,
+      filteredMasjids.length
+    );
+    if (filteredMasjids.length === 0) return;
+    const button = masjidButtonRefs.current[normalizedActiveMasjidIndex];
+    button?.focus();
+  }, [filteredMasjids.length, normalizedActiveMasjidIndex]);
+
+  const handleGridKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (filteredMasjids.length === 0) return;
+    const cols = getColumnCount();
+    let nextIndex = normalizedActiveMasjidIndex;
+
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = Math.min(
+          normalizedActiveMasjidIndex + 1,
+          filteredMasjids.length - 1
+        );
+        break;
+      case "ArrowLeft":
+        nextIndex = Math.max(normalizedActiveMasjidIndex - 1, 0);
+        break;
+      case "ArrowDown":
+        nextIndex = Math.min(
+          normalizedActiveMasjidIndex + cols,
+          filteredMasjids.length - 1
+        );
+        break;
+      case "ArrowUp":
+        nextIndex = Math.max(normalizedActiveMasjidIndex - cols, 0);
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        selectMasjid(filteredMasjids[normalizedActiveMasjidIndex].id);
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setActiveMasjidIndex(nextIndex);
   };
 
   return (
@@ -956,7 +1017,7 @@ const MasjidSelector: React.FC = () => {
         </div>
 
         {/* Masjid Grid */}
-        <div className="flex-1 overflow-auto min-h-0">
+        <div className="flex-1 overflow-auto min-h-0 pb-6 lg:pb-8">
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="w-12 h-12 rounded-full border-4 border-emerald-500/30 border-t-emerald-500 animate-spin" />
@@ -978,12 +1039,20 @@ const MasjidSelector: React.FC = () => {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6 pb-8">
-              {filteredMasjids.map((masjid) => (
+            <div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6 pb-14 lg:pb-20"
+              onKeyDown={handleGridKeyDown}
+            >
+              {filteredMasjids.map((masjid, index) => (
                 <button
                   key={masjid.id}
+                  ref={(el) => {
+                    masjidButtonRefs.current[index] = el;
+                  }}
                   onClick={() => selectMasjid(masjid.id)}
-                  className="group relative rounded-3xl bg-white/5 border border-white/10 p-6 text-left transition-all hover:bg-white/10 hover:border-emerald-500/30 hover:scale-[1.02] hover:shadow-xl hover:shadow-emerald-500/10"
+                  onFocus={() => setActiveMasjidIndex(index)}
+                  tabIndex={index === normalizedActiveMasjidIndex ? 0 : -1}
+                  className="group relative rounded-3xl bg-white/5 border border-white/10 p-6 text-left transition-all hover:bg-white/10 hover:border-emerald-500/30 hover:scale-[1.02] hover:shadow-xl hover:shadow-emerald-500/10 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/60 focus-visible:border-emerald-400"
                 >
                   {/* Hover glow */}
                   <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-emerald-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1052,7 +1121,7 @@ const MasjidSelector: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="mt-auto pt-6 flex items-center justify-between border-t border-white/10">
+        <div className="mt-auto shrink-0 pt-6 flex items-center justify-between border-t border-white/10">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
               <span className="text-sm font-bold text-white">UW</span>
