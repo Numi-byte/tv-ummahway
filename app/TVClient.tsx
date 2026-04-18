@@ -35,6 +35,12 @@ type AnnouncementRow = {
   category: string;
   is_pinned: boolean;
 };
+type TVSettingsRow = {
+  masjid_id: string;
+  slide_duration_seconds: number;
+  enabled_slides: string[];
+  theme: string;
+};
 type JumuahRow = {
   id: number;
   slot: number;
@@ -112,6 +118,15 @@ const timeToMins = (t?: string | null) => {
   const [h, m] = t.slice(0, 5).split(":").map(Number);
   return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
 };
+const minsToTime = (mins: number) => {
+  const safe = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+  return `${two(Math.floor(safe / 60))}:${two(safe % 60)}`;
+};
+const shiftTimeByMinutes = (time: string, delta: number) => {
+  const mins = timeToMins(time);
+  if (mins == null) return time;
+  return minsToTime(mins + delta);
+};
 
 function nowInTz(tz: string | null) {
   const timeZone = tz || "Europe/Rome";
@@ -136,6 +151,35 @@ function nowInTz(tz: string | null) {
     weekday: get("weekday"),
     timeZone,
   };
+}
+
+function formatGregorianDate(tz: string | null) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz || "Europe/Rome",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
+function formatHijriDate(tz: string | null) {
+  return new Intl.DateTimeFormat("en-GB-u-ca-islamic", {
+    timeZone: tz || "Europe/Rome",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+}
+
+function ordinal(slot: number) {
+  const mod100 = slot % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${slot}th`;
+  const mod10 = slot % 10;
+  if (mod10 === 1) return `${slot}st`;
+  if (mod10 === 2) return `${slot}nd`;
+  if (mod10 === 3) return `${slot}rd`;
+  return `${slot}th`;
 }
 
 function getDeviceTimezone() {
@@ -827,7 +871,10 @@ const MasjidSelector: React.FC = () => {
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMasjidIndex, setActiveMasjidIndex] = useState(0);
+  const [activeCityIndex, setActiveCityIndex] = useState(0);
   const masjidButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const cityButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -872,6 +919,7 @@ const MasjidSelector: React.FC = () => {
     filteredMasjids.length > 0
       ? Math.min(activeMasjidIndex, filteredMasjids.length - 1)
       : 0;
+  const cityOptions = ["All", ...cities];
 
   const selectMasjid = (id: string) => {
     router.push(`/?masjid=${id}`);
@@ -917,6 +965,15 @@ const MasjidSelector: React.FC = () => {
         );
         break;
       case "ArrowUp":
+        if (normalizedActiveMasjidIndex < cols) {
+          event.preventDefault();
+          const selectedIndex = selectedCity
+            ? Math.max(0, cityOptions.indexOf(selectedCity))
+            : 0;
+          setActiveCityIndex(selectedIndex);
+          cityButtonRefs.current[selectedIndex]?.focus();
+          return;
+        }
         nextIndex = Math.max(normalizedActiveMasjidIndex - cols, 0);
         break;
       case "Enter":
@@ -930,6 +987,43 @@ const MasjidSelector: React.FC = () => {
 
     event.preventDefault();
     setActiveMasjidIndex(nextIndex);
+  };
+
+  const handleCityKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement | HTMLButtonElement>
+  ) => {
+    let nextIndex = activeCityIndex;
+
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = Math.min(activeCityIndex + 1, cityOptions.length - 1);
+        break;
+      case "ArrowLeft":
+        nextIndex = Math.max(activeCityIndex - 1, 0);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        if (filteredMasjids.length > 0) {
+          setActiveMasjidIndex(0);
+          masjidButtonRefs.current[0]?.focus();
+        }
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        setSelectedCity(nextIndex === 0 ? null : cityOptions[nextIndex]);
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setActiveCityIndex(nextIndex);
+    cityButtonRefs.current[nextIndex]?.focus();
   };
 
   return (
@@ -965,10 +1059,17 @@ const MasjidSelector: React.FC = () => {
           {/* Search */}
           <div className="relative w-full">
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Search masjids..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  cityButtonRefs.current[activeCityIndex]?.focus();
+                }
+              }}
               className="w-full px-5 py-3 rounded-xl bg-black/20 border border-white/10 text-white placeholder-white/35 text-base lg:text-lg focus:outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all"
             />
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30">
@@ -989,9 +1090,19 @@ const MasjidSelector: React.FC = () => {
           </div>
 
           {/* City filter */}
-          <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onKeyDown={handleCityKeyDown}
+          >
             <button
-              onClick={() => setSelectedCity(null)}
+              onClick={() => {
+                setSelectedCity(null);
+                setActiveCityIndex(0);
+              }}
+              ref={(el) => {
+                cityButtonRefs.current[0] = el;
+              }}
+              onFocus={() => setActiveCityIndex(0)}
               className={`whitespace-nowrap px-4 py-2 rounded-lg text-xs lg:text-sm font-semibold transition-all ${
                 !selectedCity
                   ? "bg-emerald-500 text-emerald-950"
@@ -1000,10 +1111,17 @@ const MasjidSelector: React.FC = () => {
             >
               All Cities
             </button>
-            {cities.map((city) => (
+            {cities.map((city, cityIdx) => (
               <button
                 key={city}
-                onClick={() => setSelectedCity(city)}
+                onClick={() => {
+                  setSelectedCity(city);
+                  setActiveCityIndex(cityIdx + 1);
+                }}
+                ref={(el) => {
+                  cityButtonRefs.current[cityIdx + 1] = el;
+                }}
+                onFocus={() => setActiveCityIndex(cityIdx + 1)}
                 className={`whitespace-nowrap px-4 py-2 rounded-lg text-xs lg:text-sm font-semibold transition-all ${
                   selectedCity === city
                     ? "bg-emerald-500 text-emerald-950"
@@ -1185,6 +1303,7 @@ function TVDisplay({
   const [prayers, setPrayers] = useState<PrayerRow[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
   const [jumuahSlots, setJumuahSlots] = useState<JumuahRow[]>([]);
+  const [tvSettings, setTvSettings] = useState<TVSettingsRow | null>(null);
   const [weather, setWeather] = useState<WeatherOut | null>(null);
   const [hadith, setHadith] = useState<HadithOut | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1402,29 +1521,64 @@ function TVDisplay({
         .eq("date", today);
       if (alive.current) setPrayers((p ?? []) as PrayerRow[]);
 
+      const nowIso = new Date().toISOString();
       const { data: a } = await supabase
-        .from("masjid_announcements")
-        .select("*")
+        .from("public.masjid_announcements")
+        .select("id,title,body,category,is_pinned,starts_at,ends_at")
         .eq("masjid_id", mId)
-        .or("starts_at.is.null,starts_at.lte.now()")
-        .or("ends_at.is.null,ends_at.gte.now()")
+        .or(`starts_at.is.null,starts_at.lte.${nowIso}`)
+        .or(`ends_at.is.null,ends_at.gte.${nowIso}`)
         .order("is_pinned", { ascending: false })
         .limit(5);
       if (alive.current) setAnnouncements((a ?? []) as AnnouncementRow[]);
 
+      const { data: s } = await supabase
+        .from("public.masjid_tv_settings")
+        .select("masjid_id,slide_duration_seconds,enabled_slides,theme")
+        .eq("masjid_id", mId)
+        .maybeSingle();
+      if (alive.current) setTvSettings((s as TVSettingsRow | null) ?? null);
+
       const { data: j } = await supabase
-        .from("masjid_jumuah_times")
-        .select("*")
+        .from("public.masjid_jumuah_times")
+        .select(
+          "id,slot,khutbah_time,jamaat_time,language,notes,valid_from,valid_to"
+        )
         .eq("masjid_id", mId)
         .order("slot")
-        .limit(4);
+        .limit(8);
       if (alive.current) {
         const active = (j ?? []).filter(
           (r: JumuahRow) =>
             (!r.valid_from || r.valid_from <= today) &&
             (!r.valid_to || r.valid_to >= today)
         );
-        setJumuahSlots(active as JumuahRow[]);
+        const sorted = (active as JumuahRow[]).sort((a, b) => a.slot - b.slot);
+        const deduped = sorted.filter(
+          (slot, index, arr) => index === arr.findIndex((x) => x.slot === slot.slot)
+        );
+
+        if (deduped.length > 0) {
+          setJumuahSlots(deduped);
+        } else {
+          const dhuhr = ((p ?? []) as PrayerRow[]).find((row) => row.prayer === "dhuhr");
+          if (dhuhr?.jamaat_time) {
+            setJumuahSlots([
+              {
+                id: -1,
+                slot: 1,
+                khutbah_time: shiftTimeByMinutes(dhuhr.jamaat_time, -15),
+                jamaat_time: dhuhr.jamaat_time,
+                language: null,
+                notes: "Fallback from Dhuhr Jamaat",
+                valid_from: today,
+                valid_to: today,
+              },
+            ]);
+          } else {
+            setJumuahSlots([]);
+          }
+        }
       }
 
       // Weather
@@ -1450,11 +1604,18 @@ function TVDisplay({
         masjid: mMasjid,
         prayers: (p ?? []) as PrayerRow[],
         announcements: (a ?? []) as AnnouncementRow[],
-        jumuahSlots: ((j ?? []).filter(
-          (r: JumuahRow) =>
-            (!r.valid_from || r.valid_from <= today) &&
-            (!r.valid_to || r.valid_to >= today)
-        ) ?? []) as JumuahRow[],
+        jumuahSlots:
+          ((j ?? [])
+            .filter(
+              (r: JumuahRow) =>
+                (!r.valid_from || r.valid_from <= today) &&
+                (!r.valid_to || r.valid_to >= today)
+            )
+            .sort((a: JumuahRow, b: JumuahRow) => a.slot - b.slot)
+            .filter(
+              (slot: JumuahRow, index: number, arr: JumuahRow[]) =>
+                index === arr.findIndex((x) => x.slot === slot.slot)
+            ) ?? []) as JumuahRow[],
         weather,
         hadith,
       });
@@ -1568,39 +1729,114 @@ function TVDisplay({
     );
   }
 
-  // Get current announcement for announcement slides
-  const announcementIndex =
-    slides.slice(0, currentSlide + 1).filter((s) => s === "announcement")
-      .length - 1;
+  const todayRows = prayers.filter((p) => p.date === todayKey);
+  const nextPrayerRow = next?.row ?? null;
+  const currentMins = clock.hour * 60 + clock.minute;
+  const currentSecondsOfDay = clock.hour * 3600 + clock.minute * 60 + clock.second;
+  const activePrayer = todayRows.find((row) => {
+    const adhanMins = timeToMins(row.start_time);
+    const jamaatMins = timeToMins(row.jamaat_time);
+    if (adhanMins == null || jamaatMins == null) return false;
+    return currentMins >= adhanMins && currentMins < jamaatMins;
+  });
 
-  // Render current slide
-  const renderSlide = () => {
-    const slideType = slides[currentSlide];
-    switch (slideType) {
-      case "welcome":
-        return <WelcomeSlide masjid={masjid} clock={clock} />;
-      case "clock":
-        return <ClockSlide clock={clock} next={next} />;
-      case "prayers":
-        return <PrayersSlide prayers={prayers} next={next} tz={tz} />;
-      case "next-prayer":
-        return next ? <NextPrayerSlide next={next} clock={clock} /> : null;
-      case "jumuah":
-        return <JumuahSlide slots={jumuahSlots} />;
-      case "announcement":
-        return announcements[announcementIndex] ? (
-          <AnnouncementSlide announcement={announcements[announcementIndex]} />
-        ) : null;
-      case "weather":
-        return weather ? <WeatherSlide weather={weather} /> : null;
-      case "hadith":
-        return hadith ? <HadithSlide hadith={hadith} /> : null;
-      case "qr":
-        return <QRSlide masjid={masjid} />;
-      default:
-        return null;
-    }
-  };
+  const minutesToAdhan = nextPrayerRow
+    ? (timeToMins(nextPrayerRow.start_time) ?? 0) - currentMins
+    : null;
+  const minutesToJamaat = nextPrayerRow
+    ? (timeToMins(nextPrayerRow.jamaat_time) ?? 0) - currentMins
+    : null;
+  const isQuietMode = Boolean(activePrayer);
+  const isPreAdhanMode =
+    !isQuietMode &&
+    minutesToAdhan != null &&
+    minutesToAdhan >= 0 &&
+    minutesToAdhan <= 15;
+  const isPostAdhanMode =
+    !isQuietMode &&
+    minutesToAdhan != null &&
+    minutesToAdhan < 0 &&
+    minutesToJamaat != null &&
+    minutesToJamaat > 0;
+  const isJumuahMode = isFriday && jumuahSlots.length > 0;
+
+  const mainMode: "daily" | "pre-adhan" | "post-adhan" | "jumuah" | "silent" =
+    isQuietMode
+      ? "silent"
+      : isJumuahMode
+      ? "jumuah"
+      : isPostAdhanMode
+      ? "post-adhan"
+      : isPreAdhanMode
+      ? "pre-adhan"
+      : "daily";
+
+  const effectiveCycleSec = Math.max(4, tvSettings?.slide_duration_seconds ?? cycleSec);
+  const announcementIndex = Math.floor(
+    (Date.now() / 1000 / effectiveCycleSec) % Math.max(1, announcements.length)
+  );
+  const activeAnnouncement = announcements[announcementIndex] ?? null;
+  const priority = (activeAnnouncement?.category || "").toLowerCase();
+  const announcementLevel =
+    activeAnnouncement?.is_pinned || priority.includes("urgent")
+      ? "urgent"
+      : priority.includes("important")
+      ? "important"
+      : "standard";
+  const statusChipLabel =
+    mainMode === "jumuah"
+      ? "Jumuah today"
+      : mainMode === "silent"
+      ? "Jamaat in progress"
+      : formatHijriDate(tz).toLowerCase().includes("ramadan")
+      ? "Ramadan mode"
+      : mainMode === "pre-adhan"
+      ? "Silent mode soon"
+      : "Sunrise";
+
+  const nextAdhanSeconds =
+    nextPrayerRow != null
+      ? Math.max(
+          0,
+          ((timeToMins(nextPrayerRow.start_time) ?? currentMins) * 60) -
+            currentSecondsOfDay
+        )
+      : 0;
+  const nextJamaatSeconds =
+    nextPrayerRow != null
+      ? Math.max(
+          0,
+          ((timeToMins(nextPrayerRow.jamaat_time) ?? currentMins) * 60) -
+            currentSecondsOfDay
+        )
+      : 0;
+  const twoDigitTime = (sec: number) =>
+    `${two(Math.floor(sec / 3600))}:${two(Math.floor((sec % 3600) / 60))}:${two(
+      sec % 60
+    )}`;
+  const ringColor =
+    mainMode === "silent"
+      ? "rgba(255,255,255,0.12)"
+      : mainMode === "jumuah"
+      ? "rgba(251,191,36,0.7)"
+      : mainMode === "post-adhan"
+      ? "rgba(16,185,129,0.75)"
+      : mainMode === "pre-adhan"
+      ? "rgba(52,211,153,0.8)"
+      : "rgba(148,163,184,0.55)";
+  const prayerNameForHero = nextPrayerRow
+    ? PRAYER_LABELS[nextPrayerRow.prayer]
+    : "Next Prayer";
+  const heroTitle =
+    mainMode === "post-adhan"
+      ? "Jamaat begins in"
+      : mainMode === "pre-adhan"
+      ? `${prayerNameForHero} in`
+      : `Next Prayer: ${prayerNameForHero}`;
+  const heroCountdown =
+    mainMode === "post-adhan" ? twoDigitTime(nextJamaatSeconds) : twoDigitTime(nextAdhanSeconds);
+  const hideAnnouncementRail = mainMode === "silent";
+  const deemphasizeAnnouncementRail = mainMode === "post-adhan";
 
   const gateActive = !isFs; // Only clickable thing is fullscreen gate until fullscreen is active
 
@@ -1629,58 +1865,7 @@ function TVDisplay({
               transform: `scale(${stageMetrics.scale})`,
             }}
           >
-            {/* Progress bar */}
-            <div
-              className={`absolute top-0 left-0 right-0 h-1 bg-white/5 z-50 transition-opacity ${
-                showControls ? "opacity-100" : "opacity-0"
-              }`}
-            >
-              <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-100"
-                style={{ width: `${progress * 100}%` }}
-              />
-            </div>
-
-            {/* Slide dots */}
-            <div
-              className={`absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 transition-opacity ${
-                showControls ? "opacity-100" : "opacity-0"
-              }`}
-            >
-              {slides.map((_, i) => (
-                <div
-                  key={i}
-                  className={`w-2 h-2 rounded-full transition-all ${
-                    i === currentSlide ? "bg-emerald-400 w-8" : "bg-white/20"
-                  }`}
-                />
-              ))}
-            </div>
-
-            {/* Branding (Play + Apple mini QR) */}
-            <div
-              className={`absolute bottom-8 right-8 flex items-center gap-4 z-50 transition-opacity ${
-                showControls ? "opacity-100" : "opacity-0"
-              }`}
-            >
-              <div className="text-right">
-                <div className="text-xs uppercase tracking-[0.3em] text-white/40">
-                  Powered by
-                </div>
-                <div className="text-lg font-bold text-white/70">UmmahWay</div>
-                <div className="text-[10px] uppercase tracking-[0.3em] text-white/30 mt-1">
-                  Android • iPhone
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="rounded-xl bg-white p-2">
-                  <QRCode value={PLAY_STORE_URL} size={44} />
-                </div>
-                <div className="rounded-xl bg-white p-2">
-                  <QRCode value={APPLE_STORE_URL} size={44} />
-                </div>
-              </div>
-            </div>
+            <div className="absolute inset-0 islamic-pattern opacity-30 pointer-events-none" />
 
             {/* Current time badge */}
             <div
@@ -1744,13 +1929,168 @@ function TVDisplay({
               <span className="font-medium">Minimize</span>
             </button>
 
-            {/* Slide content */}
-            <div
-              className={`transition-opacity duration-300 ${
-                isTransitioning ? "opacity-0" : "opacity-100"
-              }`}
-            >
-              {renderSlide()}
+            <div className="relative h-full px-10 py-8">
+              <div className="absolute top-8 right-8 z-30">
+                {isJumuahMode && (
+                  <div className="rounded-full border border-amber-200/40 bg-amber-300/10 px-5 py-2 text-sm font-semibold tracking-wide text-amber-100">
+                    {jumuahSlots.length} Jumuahs Today
+                  </div>
+                )}
+              </div>
+              <div className="grid h-full grid-rows-[140px_1fr_130px] gap-5">
+                <div className="glass rounded-3xl px-8 py-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.3em] text-white/50">Masjid</p>
+                    <p className="text-3xl font-extrabold text-amber-50">{masjid.short_name || masjid.official_name}</p>
+                    {masjid.city && <p className="text-white/50 text-lg">{masjid.city}</p>}
+                    <p className="text-white/40 text-sm mt-1">{tz}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[88px] leading-[0.9] font-black tracking-tight text-amber-50 tick">
+                      {two(clock.hour)}:{two(clock.minute)}
+                      <span className="text-[34px] text-amber-100/70">:{two(clock.second)}</span>
+                    </p>
+                    <p className="text-white/65">{formatGregorianDate(tz)}</p>
+                    <p className="text-white/45 text-sm">Hijri: {formatHijriDate(tz)}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-flex rounded-full border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-100">
+                      {statusChipLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[34%_66%] gap-5">
+                  <div className="space-y-3">
+                    {PRAYER_ORDER.map((key) => {
+                      const row = todayRows.find((r) => r.prayer === key);
+                      if (!row) return null;
+                      const isCurrentNext = nextPrayerRow?.prayer === key;
+                      const isActive = activePrayer?.prayer === key;
+                      const cardTone = isCurrentNext || isActive;
+                      return (
+                        <div
+                          key={key}
+                          className={`glass rounded-2xl px-5 py-4 border ${
+                            cardTone
+                              ? "border-emerald-300/40 bg-emerald-300/10"
+                              : "border-white/10"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className="text-2xl font-bold tracking-wide">
+                              {key === "dhuhr" && isFriday ? "Dhuhr / Jumuah" : PRAYER_LABELS[key]}
+                            </p>
+                            <p className="text-xs uppercase text-white/60">
+                              {isActive ? "active" : isCurrentNext ? "next" : "done"}
+                            </p>
+                          </div>
+                          <div className="mt-2 flex items-end justify-between">
+                            <p className="text-white/65">Adhan {formatTime(row.start_time)}</p>
+                            <p className="text-4xl font-black text-amber-100"> {formatTime(row.jamaat_time)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="glass rounded-3xl p-8 border border-white/15 relative overflow-hidden">
+                    <div className="absolute -right-28 top-1/2 h-72 w-72 -translate-y-1/2 rounded-full border border-amber-200/25" />
+                    <div className="absolute -right-20 top-1/2 h-56 w-56 -translate-y-1/2 rounded-full border border-emerald-200/30" />
+                    <div
+                      className="absolute right-8 top-8 h-44 w-44 rounded-full"
+                      style={{
+                        background: `conic-gradient(${ringColor} 0deg, ${ringColor} 280deg, rgba(255,255,255,0.06) 280deg 360deg)`,
+                        boxShadow: "0 0 60px rgba(16,185,129,0.15)",
+                      }}
+                    >
+                      <div className="absolute inset-[16px] rounded-full bg-slate-950/85 border border-white/10" />
+                    </div>
+                    {mainMode === "silent" ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center">
+                        <p className="text-5xl font-black text-amber-50">Please straighten the rows</p>
+                        <p className="mt-6 text-3xl text-white/80">Silence your phones</p>
+                        <p className="mt-8 text-white/50 uppercase tracking-[0.3em]">Jamaat in progress</p>
+                      </div>
+                    ) : mainMode === "jumuah" ? (
+                      <div>
+                        <p className="text-white/60 uppercase tracking-[0.3em]">Friday signature mode</p>
+                        <h2 className="mt-2 text-6xl font-black text-amber-50">Jumuah Today</h2>
+                        <div className="mt-8 space-y-4">
+                          {jumuahSlots.map((slot) => (
+                            <div key={slot.id} className="rounded-2xl border border-amber-200/25 bg-amber-300/10 px-6 py-4 flex items-center justify-between">
+                              <div>
+                                <p className="text-2xl font-semibold">{ordinal(slot.slot)} Jumuah</p>
+                                <p className="text-white/65 text-sm">
+                                  Khutbah {formatTime(slot.khutbah_time)}
+                                </p>
+                              </div>
+                              <p className="text-4xl font-black">{formatTime(slot.jamaat_time)}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-6 text-white/55">Khutbah starts around 15 minutes before.</p>
+                      </div>
+                    ) : (
+                      <div className="h-full flex flex-col justify-center">
+                        <p className="text-white/60 uppercase tracking-[0.3em]">Noor Ring mode</p>
+                        <h2 className="mt-2 text-6xl font-black text-amber-50">{heroTitle}</h2>
+                        <p className="mt-6 text-5xl font-black text-emerald-200">
+                          {heroCountdown}
+                        </p>
+                        <p className="mt-4 text-2xl text-white/75">
+                          Adhan {formatTime(nextPrayerRow?.start_time)} • Jamaat at {formatTime(nextPrayerRow?.jamaat_time)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {hideAnnouncementRail ? (
+                  <div className="rounded-3xl px-6 py-5 flex items-center justify-center border border-white/5 bg-slate-950/40">
+                    <p className="text-white/45 uppercase tracking-[0.3em]">Jamaat in progress</p>
+                  </div>
+                ) : (
+                  <div
+                    className={`glass rounded-3xl px-6 py-5 flex items-center justify-between border border-white/10 transition-opacity ${
+                      deemphasizeAnnouncementRail ? "opacity-45" : "opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.24em] ${
+                          announcementLevel === "urgent"
+                            ? "bg-amber-400/20 text-amber-100"
+                            : announcementLevel === "important"
+                            ? "bg-emerald-400/20 text-emerald-100"
+                            : "bg-white/10 text-white/70"
+                        }`}
+                      >
+                        {announcementLevel}
+                      </span>
+                      <div>
+                        <p className="text-xl font-semibold">
+                          {activeAnnouncement?.title || "No active announcements"}
+                        </p>
+                        {activeAnnouncement?.body ? (
+                          <p className="text-white/60">{activeAnnouncement.body}</p>
+                        ) : (
+                          <p className="text-white/45">Please check back later.</p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-sm text-white/55 mr-5">{activeAnnouncement ? "today" : "none"}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-white p-2">
+                        <QRCode value={PLAY_STORE_URL} size={40} />
+                      </div>
+                      <div className="rounded-xl bg-white p-2">
+                        <QRCode value={APPLE_STORE_URL} size={40} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* FULLSCREEN GATE OVERLAY (ONLY CLICKABLE THING when not fullscreen) */}
