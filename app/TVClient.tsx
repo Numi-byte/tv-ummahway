@@ -1568,49 +1568,39 @@ function TVDisplay({
     );
   }
 
-  const todayRows = prayers.filter((p) => p.date === todayKey);
-  const nextPrayerRow = next?.row ?? null;
-  const currentMins = clock.hour * 60 + clock.minute;
-  const activePrayer = todayRows.find((row) => {
-    const adhanMins = timeToMins(row.start_time);
-    const jamaatMins = timeToMins(row.jamaat_time);
-    if (adhanMins == null || jamaatMins == null) return false;
-    return currentMins >= adhanMins && currentMins < jamaatMins;
-  });
+  // Get current announcement for announcement slides
+  const announcementIndex =
+    slides.slice(0, currentSlide + 1).filter((s) => s === "announcement")
+      .length - 1;
 
-  const minutesToAdhan = nextPrayerRow
-    ? (timeToMins(nextPrayerRow.start_time) ?? 0) - currentMins
-    : null;
-  const minutesToJamaat = nextPrayerRow
-    ? (timeToMins(nextPrayerRow.jamaat_time) ?? 0) - currentMins
-    : null;
-  const isQuietMode = Boolean(activePrayer);
-  const isPreAdhanMode =
-    !isQuietMode &&
-    minutesToAdhan != null &&
-    minutesToAdhan >= 0 &&
-    minutesToAdhan <= 15;
-  const isPostAdhanMode =
-    !isQuietMode &&
-    minutesToAdhan != null &&
-    minutesToAdhan < 0 &&
-    minutesToJamaat != null &&
-    minutesToJamaat > 0;
-  const isJumuahMode = isFriday && jumuahSlots.length > 0;
-
-  const mainMode: "daily" | "pre-adhan" | "post-adhan" | "jumuah" | "silent" =
-    isQuietMode
-      ? "silent"
-      : isJumuahMode
-      ? "jumuah"
-      : isPostAdhanMode
-      ? "post-adhan"
-      : isPreAdhanMode
-      ? "pre-adhan"
-      : "daily";
-
-  const announcementIndex = Math.floor((Date.now() / 1000 / cycleSec) % Math.max(1, announcements.length));
-  const activeAnnouncement = announcements[announcementIndex] ?? null;
+  // Render current slide
+  const renderSlide = () => {
+    const slideType = slides[currentSlide];
+    switch (slideType) {
+      case "welcome":
+        return <WelcomeSlide masjid={masjid} clock={clock} />;
+      case "clock":
+        return <ClockSlide clock={clock} next={next} />;
+      case "prayers":
+        return <PrayersSlide prayers={prayers} next={next} tz={tz} />;
+      case "next-prayer":
+        return next ? <NextPrayerSlide next={next} clock={clock} /> : null;
+      case "jumuah":
+        return <JumuahSlide slots={jumuahSlots} />;
+      case "announcement":
+        return announcements[announcementIndex] ? (
+          <AnnouncementSlide announcement={announcements[announcementIndex]} />
+        ) : null;
+      case "weather":
+        return weather ? <WeatherSlide weather={weather} /> : null;
+      case "hadith":
+        return hadith ? <HadithSlide hadith={hadith} /> : null;
+      case "qr":
+        return <QRSlide masjid={masjid} />;
+      default:
+        return null;
+    }
+  };
 
   const gateActive = !isFs; // Only clickable thing is fullscreen gate until fullscreen is active
 
@@ -1639,7 +1629,58 @@ function TVDisplay({
               transform: `scale(${stageMetrics.scale})`,
             }}
           >
-            <div className="absolute inset-0 islamic-pattern opacity-30 pointer-events-none" />
+            {/* Progress bar */}
+            <div
+              className={`absolute top-0 left-0 right-0 h-1 bg-white/5 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-100"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+
+            {/* Slide dots */}
+            <div
+              className={`absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              {slides.map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    i === currentSlide ? "bg-emerald-400 w-8" : "bg-white/20"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* Branding (Play + Apple mini QR) */}
+            <div
+              className={`absolute bottom-8 right-8 flex items-center gap-4 z-50 transition-opacity ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <div className="text-right">
+                <div className="text-xs uppercase tracking-[0.3em] text-white/40">
+                  Powered by
+                </div>
+                <div className="text-lg font-bold text-white/70">UmmahWay</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-white/30 mt-1">
+                  Android • iPhone
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-white p-2">
+                  <QRCode value={PLAY_STORE_URL} size={44} />
+                </div>
+                <div className="rounded-xl bg-white p-2">
+                  <QRCode value={APPLE_STORE_URL} size={44} />
+                </div>
+              </div>
+            </div>
 
             {/* Current time badge */}
             <div
@@ -1703,130 +1744,13 @@ function TVDisplay({
               <span className="font-medium">Minimize</span>
             </button>
 
-            <div className="relative h-full px-10 py-8">
-              <div className="absolute top-8 right-8 z-30">
-                {isJumuahMode && (
-                  <div className="rounded-full border border-amber-200/40 bg-amber-300/10 px-5 py-2 text-sm font-semibold tracking-wide text-amber-100">
-                    {jumuahSlots.length} Jumuahs Today
-                  </div>
-                )}
-              </div>
-              <div className="grid h-full grid-rows-[140px_1fr_130px] gap-5">
-                <div className="glass rounded-3xl px-8 py-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.3em] text-white/50">Masjid</p>
-                    <p className="text-3xl font-extrabold text-amber-50">{masjid.short_name || masjid.official_name}</p>
-                    {masjid.city && <p className="text-white/50 text-lg">{masjid.city}</p>}
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[88px] leading-[0.9] font-black tracking-tight text-amber-50 tick">
-                      {two(clock.hour)}:{two(clock.minute)}
-                      <span className="text-[34px] text-amber-100/70">:{two(clock.second)}</span>
-                    </p>
-                    <p className="text-white/65">{clock.weekday}, {two(clock.day)}/{two(clock.month)}/{clock.year}</p>
-                    <p className="text-white/45 text-sm">Hijri: 19 Shawwal 1447</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="inline-flex rounded-full border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-100">
-                      {mainMode === "jumuah" ? "Jumuah today" : mainMode === "silent" ? "Silent mode" : "Sunrise status"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-[34%_66%] gap-5">
-                  <div className="space-y-3">
-                    {PRAYER_ORDER.map((key) => {
-                      const row = todayRows.find((r) => r.prayer === key);
-                      if (!row) return null;
-                      const isCurrentNext = nextPrayerRow?.prayer === key;
-                      const isActive = activePrayer?.prayer === key;
-                      const cardTone = isCurrentNext || isActive;
-                      return (
-                        <div
-                          key={key}
-                          className={`glass rounded-2xl px-5 py-4 border ${
-                            cardTone
-                              ? "border-emerald-300/40 bg-emerald-300/10"
-                              : "border-white/10"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <p className="text-2xl font-bold tracking-wide">{PRAYER_LABELS[key]}</p>
-                            <p className="text-xs uppercase text-white/60">
-                              {isActive ? "active" : isCurrentNext ? "next" : "done"}
-                            </p>
-                          </div>
-                          <div className="mt-2 flex items-end justify-between">
-                            <p className="text-white/65">Adhan {formatTime(row.start_time)}</p>
-                            <p className="text-4xl font-black text-amber-100"> {formatTime(row.jamaat_time)}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="glass rounded-3xl p-8 border border-white/15 relative overflow-hidden">
-                    <div className="absolute -right-28 top-1/2 h-72 w-72 -translate-y-1/2 rounded-full border border-amber-200/25" />
-                    <div className="absolute -right-20 top-1/2 h-56 w-56 -translate-y-1/2 rounded-full border border-emerald-200/30" />
-                    {mainMode === "silent" ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center">
-                        <p className="text-5xl font-black text-amber-50">Please straighten the rows</p>
-                        <p className="mt-6 text-3xl text-white/80">Silence your phones</p>
-                        <p className="mt-8 text-white/50 uppercase tracking-[0.3em]">Jamaat in progress</p>
-                      </div>
-                    ) : mainMode === "jumuah" ? (
-                      <div>
-                        <p className="text-white/60 uppercase tracking-[0.3em]">Friday signature mode</p>
-                        <h2 className="mt-2 text-6xl font-black text-amber-50">Jumuah Today</h2>
-                        <div className="mt-8 space-y-4">
-                          {jumuahSlots.map((slot) => (
-                            <div key={slot.id} className="rounded-2xl border border-amber-200/25 bg-amber-300/10 px-6 py-4 flex items-center justify-between">
-                              <p className="text-2xl font-semibold">{slot.slot}st Jumuah</p>
-                              <p className="text-4xl font-black">{formatTime(slot.jamaat_time)}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="mt-6 text-white/55">Khutbah starts around 15 minutes before.</p>
-                      </div>
-                    ) : (
-                      <div className="h-full flex flex-col justify-center">
-                        <p className="text-white/60 uppercase tracking-[0.3em]">Noor Ring mode</p>
-                        <h2 className="mt-2 text-6xl font-black text-amber-50">
-                          {nextPrayerRow ? `Next Prayer: ${PRAYER_LABELS[nextPrayerRow.prayer]}` : "Prayer times loading"}
-                        </h2>
-                        <p className="mt-6 text-5xl font-black text-emerald-200">
-                          {mainMode === "post-adhan"
-                            ? `Jamaat in ${two(Math.max(0, Math.floor((minutesToJamaat ?? 0) / 60)))}:${two(Math.max(0, (minutesToJamaat ?? 0) % 60))}`
-                            : `${PRAYER_LABELS[nextPrayerRow?.prayer ?? "maghrib"]} in ${two(Math.max(0, Math.floor((minutesToAdhan ?? 0) / 60)))}:${two(Math.max(0, (minutesToAdhan ?? 0) % 60))}`}
-                        </p>
-                        <p className="mt-4 text-2xl text-white/75">
-                          Adhan {formatTime(nextPrayerRow?.start_time)} • Jamaat {formatTime(nextPrayerRow?.jamaat_time)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="glass rounded-3xl px-6 py-5 flex items-center justify-between border border-white/10">
-                  <div className="flex items-center gap-4">
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-white/70">
-                      {activeAnnouncement?.is_pinned ? "Urgent" : "Standard"}
-                    </span>
-                    <div>
-                      <p className="text-xl font-semibold">{activeAnnouncement?.title || "Quran class after Isha"}</p>
-                      <p className="text-white/60">{activeAnnouncement?.body || "Fundraiser this Saturday"}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl bg-white p-2">
-                      <QRCode value={PLAY_STORE_URL} size={40} />
-                    </div>
-                    <div className="rounded-xl bg-white p-2">
-                      <QRCode value={APPLE_STORE_URL} size={40} />
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {/* Slide content */}
+            <div
+              className={`transition-opacity duration-300 ${
+                isTransitioning ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              {renderSlide()}
             </div>
 
             {/* FULLSCREEN GATE OVERLAY (ONLY CLICKABLE THING when not fullscreen) */}
